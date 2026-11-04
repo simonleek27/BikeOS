@@ -34,6 +34,8 @@ The photo depicts drop handlebars, but we must **not assume Simon owns a drop-ba
 
 ## 2. Product architecture — the iPhone is the navigation brain
 
+> **Superseded 2026-11-04.** See [docs/architecture.md](docs/architecture.md): the phone computes routes, the ESP has its own GPS and follows the route, and the ESP asks the phone for a reroute when off route. The text below is kept for history.
+
 **iPhone (SwiftUI + MapKit + CoreLocation + CoreBluetooth):**
 1. Search for a cycling destination, select/start route.
 2. Calculate cycling directions, receive GPS and derive speed, trip distance, navigation progress and ETA.
