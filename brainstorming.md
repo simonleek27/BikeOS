@@ -58,6 +58,8 @@ Define a shared `protocol/` specification (versioning, units, optional fields, p
 
 ## 3. Screen choices — research, don't order yet
 
+> **Superseded 2026-11-04.** Display and GPS are chosen in [docs/architecture.md](docs/architecture.md): Sharp 2.7" memory LCD (Adafruit 4694) and a u-blox NEO-M8N module. The 4.3" colour TFT is dropped.
+
 **Leading candidate:** [Waveshare ESP32-S3-LCD-4.3 (non-touch variant)](https://www.waveshare.com/esp32-s3-touch-lcd-4.3.htm), **4.3 inches, 800×480**; Waveshare lists approximate board dimensions **106.1×67.8 mm** for the 4.3-inch family. Verify the exact non-touch SKU, sunlight readability, exposed GPIOs, connector access, backlight power, and Netherlands/EU delivered price.
 
 **Alternative:** [Waveshare ESP32-S3-Touch-LCD-4.3B](https://www.waveshare.com/esp32-s3-touch-lcd-4.3b.htm?sku=28141), which we originally considered, including a cased variant. It **includes touch hardware**, even though we would ignore touch. Its documentation lists **800×480**, **550 cd/m²**, **112.4×75.1 mm bare / 116.3×79 mm cased**, and around **5 V × 450 mA = 2.25 W** for the reference board. These numbers **must not be assumed for the different non-touch board**.
@@ -133,6 +135,8 @@ Useful EU supplier categories to investigate: Waveshare directly and EU reseller
 Deliver demonstrable working milestones, not mockups alone. Maintain code, wiring diagrams, CAD, ride-test logs and failure notes for an open-source engineering portfolio.
 
 ## 8. Working together — ND, Claude and ChatGPT
+
+> **Superseded 2026-11-04.** There is no fixed AI split; ND and Simon each use whatever assistant they like. The repo layout below still stands.
 
 Use this GitHub repository as the **shared source of truth**. Proposed future layout (not created yet):
 
