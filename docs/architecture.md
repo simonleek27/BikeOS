@@ -3,10 +3,10 @@
 > Status: agreed direction as of 4 November 2026 (ND and Simon). Supersedes section 2 of `brainstorming.md`.
 > Both bikes are non-electric Swapfiets bikes, so there is no e-bike battery or dynamo to integrate with for v1.
 >
-> Hardware bring-up update, 16 November 2026: the ESP32 and LCD are physically
-> on hand. The ESP32 is connected and ROM-verified as an ESP32-S3 with 16 MB
-> flash and 8 MB PSRAM. The LCD is not wired and its physical model/revision
-> must be verified before pin assignment.
+> Hardware/navigation update, 16 November 2026: the ESP32-S3 is verified with
+> 16 MB flash and 8 MB PSRAM. The LCD is verified as an EastRising
+> ERC12864SBSF-14 (ST7565R, 128 × 64); it is not wired because the bare panel
+> still needs its FPC carrier and charge-pump capacitor network.
 
 ## The one-line version
 
@@ -14,9 +14,11 @@ The phone computes the route. The ESP has its own GPS and follows the route on i
 
 ## Scope for v1
 
-In: ESP32-S3, memory LCD, GPS module, front light, BLE link, iPhone app, route following and rerouting.
+In: ESP32-S3, ST7565R LCD, GPS module, BLE link, iPhone app, compact local map
+geometry, route following, and rerouting.
 
-Out, deliberately: turn signals (buttons get fitted but not wired), handlebar mount and enclosure (mechanical track, separate), speed display, offline routing, dynamo charging, maps on screen.
+Out, deliberately: turn signals, handlebar mount/enclosure (mechanical track),
+full offline route calculation on the ESP, and dynamo charging.
 
 ## Why not "phone is the navigation brain"
 
@@ -32,15 +34,16 @@ Moving GPS to the ESP removes both. The phone's only background job is answering
 | Part | Pick | Why | Where |
 |---|---|---|---|
 | MCU | ESP32-S3. The connected prototype measures **16 MB flash / 8 MB PSRAM**; exact module/carrier SKU awaits a silkscreen photo. A board with LiPo charging such as Seeed XIAO ESP32S3 or Adafruit Feather ESP32-S3 remains an option for the bike. | BLE 5, enough RAM for a framebuffer and route, cheap | Prototype physically on hand |
-| Display | **Adafruit SHARP Memory Display Breakout 2.7" 400x240** (product 4694, Sharp LS027B7DH01) | Reflective, so readable in direct sun with no backlight; draws under 1 mA; 3-wire SPI; breakout handles the 0.5 mm flex and supply; viewable 58.8 x 35.3 mm | Opencircuit (NL) €61.50, 10 to 12 days; The Pi Hut £43 plus UK import |
-| Display, bigger option later | Sharp LS044Q7DH01 4.4" 320x240, viewable 90.8 x 68.4 mm | Same tech, larger; no breakout exists, bare panel plus own flex adapter | DigiKey ~€55 |
-| Front light | Two small white LEDs in the top bezel angled across the glass, or an edge-lit acrylic strip, on a GPIO | Memory LCDs have no backlight and the transmissive fraction (0.35 percent) is useless for one; Amsterdam is dark by 17:00 in winter | Any |
+| Display | **EastRising ERC12864SBSF-14**, 128 × 64, ST7565R, 30-pin 0.5 mm FPC | Actual panel on hand; compact monochrome framebuffer; 4-wire serial supported | Prototype physically on hand; carrier circuit required |
+| Backlight | Panel's separate white LED backlight through a current-limited transistor/MOSFET path | Approximately 45 mA typical is too much for a GPIO | On the display assembly |
 | GPS | **GY-GPSV3-NEO-M8N** (u-blox NEO-M8N, 25 mm patch antenna, backup battery, UART 9600 NMEA) | Multi-constellation helps between tall buildings; backup battery keeps clock and ephemeris so the next start takes seconds, which is how "remembers where it was parked" works; ~25 mA | TinyTronics ~€25 to €30, listed 2 to 4 weeks. Do not buy from eBay or AliExpress, fake M8Ns are common |
 | GPS, fallback | Adafruit Ultimate GPS (MTK3333) | Known good, battery holder, similar price | Opencircuit or Kiwi |
 | Battery | Single 18650 (3000 mAh) or a 2000 to 3000 mAh LiPo with the board's charger | ~70 mA total draw gives roughly 40 hours of riding | Any |
 | Buttons | Fit three momentary switches (page, select, spare) plus two for turn signals. Turn-signal pair not wired in v1 | Keeps the enclosure from needing a redesign later | Muco |
 
-Power budget: ESP32-S3 on BLE 30 to 40 mA, GPS 25 mA, display under 1 mA, front light a few mA when on. The 4.3" colour TFT and the USB power bank from the original plan are dropped.
+The LCD logic draw is small, but its backlight is the larger display load and
+must be budgeted separately. The complete battery budget will be measured after
+the carrier and GPS are connected.
 
 ## Components and responsibilities
 
@@ -53,9 +56,11 @@ Power budget: ESP32-S3 on BLE 30 to 40 mA, GPS 25 mA, display under 1 mA, front 
 - On a reroute request from the ESP: recompute from the supplied fix and heading, push the new route.
 - Ending or cancelling a route happens in the app. The device has no "end ride" button in v1; the phone sends a clear-route command.
 
-### ESP32-S3 firmware (ESP-IDF, LVGL 1-bit)
+### ESP32-S3 firmware (ESP-IDF, shared C++ 1-bit renderer)
 
-- GPS on UART at 1 Hz.
+- GPS on UART at 1 Hz, with the same NMEA/filter path tested on the host.
+- Decode a bounded local OSM geometry asset and render it into the exact
+  ST7565 1,024-byte page framebuffer.
 - Route following: match each fix to the nearest segment of the route polyline, read distance to the next maneuver from a precomputed cumulative-distance table, render arrow, distance, street name.
 - Off-route detection: more than ~30 m from the line for 5 consecutive fixes, or the matched index moving backwards. Send one reroute request with fix and heading, then at most one every 10 to 15 s until a new route arrives.
 - Fallback while waiting: point the arrow at the nearest point on the existing route. In a city this gets the rider back on track most of the time without any help from the phone.
@@ -87,9 +92,10 @@ Precompute everything on the phone so the ESP does no geometry beyond nearest-se
 
 ## Build sequence
 
-1. ESP + memory LCD bring-up: hello screen, buttons, front light.
-2. GPS bring-up: fixes on screen, time to first fix cold and warm.
-3. Route following on a hard-coded route loaded over serial.
-4. BLE: phone sends a route, ESP acks, ESP follows it.
-5. Reroute round trip with the phone locked in a pocket.
-6. Outdoor readability test in sun and at night, then hand off to the mechanical track for the enclosure.
+1. ESP bring-up and physical flash — complete.
+2. Shared navigation/map core and native 128 × 64 fake screen — complete.
+3. LCD carrier, verified wiring, and on-glass display test.
+4. UART GPS bring-up: fixes on screen, cold/warm time to first fix.
+5. BLE: phone sends a route, ESP acks, ESP follows it.
+6. Reroute round trip with the phone locked in a pocket.
+7. Outdoor readability/power testing, then mechanical enclosure handoff.

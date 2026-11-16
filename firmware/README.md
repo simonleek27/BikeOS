@@ -42,6 +42,17 @@ Exit the monitor with `Ctrl-]`.
 If auto-reset does not enter download mode: hold **BOOT**, tap and release
 **RST/EN**, release **BOOT**, then rerun the flash command.
 
-Expected output includes the BikeOS version, ESP32-S3 diagnostics, measured
-flash/PSRAM sizes, subsystem states, and a heartbeat every second.
+Expected output includes BikeOS 0.2.0, ESP32-S3 diagnostics, map/route counts,
+navigation state, progress, cross-track and maneuver distances, framebuffer
+CRCs, reroute requests, and a heartbeat.
+
+## Hardware source selection
+
+Run `idf.py menuconfig`, then open **BikeOS hardware**. The safe defaults are the
+deterministic GPS simulator and virtual 128 × 64 framebuffer. Real UART GPS and
+physical ST7565R choices expose their pin settings; unset pins default to `-1`
+and cause startup to fail instead of touching unknown hardware.
+
+Do not enable the physical display until the carrier/capacitor circuit and ESP
+GPIO map in `docs/hardware-setup.md` are complete.
 

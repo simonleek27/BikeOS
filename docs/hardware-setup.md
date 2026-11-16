@@ -1,57 +1,94 @@
 # Hardware setup
 
-## ESP32 prototype
+## Verified ESP32 prototype
 
-The prototype was queried through the Espressif ROM bootloader on 16 November
-2026. The electrical configuration below is verified; the exact carrier-board
-SKU is not yet verified from silkscreen.
+The prototype was queried through the Espressif ROM bootloader and exercised
+with ESP-IDF firmware on 16 November 2026.
 
-| Property | Verified value | Verification method |
-|---|---|---|
-| SoC | ESP32-S3 QFN56 revision 0.2 | `esptool chip-id` |
-| Flash | 16 MB external quad, 3.3 V | `esptool flash-id` |
-| PSRAM | 8 MB embedded, 3.3 V | ESP ROM feature report |
-| USB | USB Serial/JTAG | ESP ROM feature report and macOS USB enumeration |
-| macOS port | `/dev/cu.usbmodem1101` during bring-up | `arduino-cli board list` |
+| Property | Verified value |
+|---|---|
+| SoC | ESP32-S3 QFN56 revision 0.2 |
+| Flash | 16 MB, DIO at 80 MHz in the current image |
+| PSRAM | 8 MB octal PSRAM, memory test passed |
+| USB | Native USB Serial/JTAG |
+| Bring-up port | `/dev/cu.usbmodem1101` (macOS names can change) |
 
-The exact development-board/module SKU must be read from the module metal can
-and carrier-board silkscreen. Do not copy a DevKitC-1 pin map until that is done.
+The exact carrier-board SKU and which header pins are safely free still require
+a readable front/back silkscreen photo. That is why no ESP GPIO numbers are
+approved for the screen or GPS yet.
 
-## LCD status: do not wire yet
+## Verified LCD
 
-The repository architecture names Adafruit product 4694 / Sharp LS027B7DH01,
-but the screen physically on hand has not yet been verified against that model.
-No GPIO assignments are approved yet.
+The screen is an EastRising/BuyDisplay `ERC12864SBSF-14` (`ERC12864-14`
+family): 2.7 inch, 128 × 64, ST7565R, blue negative/white LED, 30-contact
+0.5 mm-pitch bottom-contact FPC. The controller supports 4-wire serial input,
+which is the selected BikeOS interface.
 
-Before wiring, provide clear photos of:
+Manufacturer sources:
 
-1. The front and back of the complete display assembly.
-2. Every header/connector label.
-3. Any product sticker, PCB revision, or panel part number.
-4. The ESP32 module and carrier-board silkscreen.
+- [ERC12864-14 product page](https://www.buydisplay.com/2-7-inch-blue-spi-cog-128x64-st7565-lcd-display-emc-and-esd-protection)
+- [ERC12864-14 datasheet](https://www.buydisplay.com/download/manual/ERC12864-14_Datasheet.pdf)
 
-After the model is confirmed, this document will contain the final wiring table
-for power, ground, SPI clock/data/chip-select, display enable, and the required
-Sharp Memory LCD polarity/VCOM signal. Connect wires only with USB/power removed.
+### Panel pin table
 
-### Conditional reference for the planned display
+This is the FPC numbering from the manufacturer datasheet, not an ESP header
+pin map.
 
-If the photos confirm **Adafruit product 4694 / Sharp LS027B7DH01**, the
-manufacturer documentation establishes these constraints:
+| FPC | Signal | 4-wire serial use |
+|---:|---|---|
+| 1 | IRS | High selects internal V0 regulator resistors |
+| 2 | P/S | Low selects serial input |
+| 3 | C86 | Parallel-interface selector; irrelevant in serial mode |
+| 4 | VR | External contrast input; unused when IRS is high |
+| 5–9 | V0–V4 | LCD bias capacitor network |
+| 10 | CAP2− | Charge-pump capacitor network |
+| 11 | CAP2+ | Charge-pump capacitor network |
+| 12 | CAP1+ | Charge-pump capacitor network |
+| 13 | CAP1− | Charge-pump capacitor network |
+| 14 | CAP3+ | Charge-pump capacitor network |
+| 15 | VOUT | Charge-pump output capacitor network |
+| 16 | VSS | Logic/panel ground |
+| 17 | VDD | 2.7–3.3 V logic supply; 3.6 V absolute maximum |
+| 18 | D7 / SI | ESP SPI MOSI |
+| 19 | D6 / SCL | ESP SPI clock |
+| 20–25 | D5–D0 | High impedance in serial mode |
+| 26 | /RD | Fixed high in serial mode |
+| 27 | /WR | Fixed high in serial mode |
+| 28 | A0 | ESP data/command GPIO |
+| 29 | /RES | ESP reset GPIO, active low |
+| 30 | CS1 | ESP chip-select GPIO, active low |
 
-- 400 × 240 monochrome pixels, 58.8 × 35.28 mm active area.
-- Write-only serial/SPI-style interface; a full framebuffer is 12,000 bytes.
-- The Adafruit breakout uses `VIN`, `GND`, `CLK`, `DI`, and active-high `CS` for
-  normal operation. The breakout accepts 3 V or 5 V power/logic.
-- The 400 × 240 panel clock is limited to 2 MHz.
-- The panel has no usable backlight; night use needs external front lighting.
+### Do not plug the bare FPC into ESP jumper wires
 
-Primary references:
+This panel is not a five-wire breakout. Pins 5–15 require the datasheet's
+external 1 µF charge-pump/bias capacitor network, the 30-pin flex requires a
+bottom-contact ZIF connector, and the white backlight is a separate load. The
+backlight is specified around 3.0 V and 45 mA typical, so it must not be powered
+from an ESP GPIO.
 
-- [Adafruit product 4694](https://www.adafruit.com/product/4694)
-- [Adafruit Sharp Memory Display guide](https://learn.adafruit.com/adafruit-sharp-memory-display-breakout)
-- [Sharp LS027B7DH01 datasheet](https://cdn-learn.adafruit.com/assets/assets/000/094/215/original/LS027B7DH01_Rev_Jun_2010.pdf)
+Required before physical LCD testing:
 
-These are not yet evidence that the physical screen on the bench is that exact
-breakout. Do not use this conditional information as a wiring instruction.
+1. A 30-pin, 0.5 mm-pitch **bottom-contact** FFC/FPC breakout or a small carrier
+   PCB made for the ERC12864-14.
+2. The capacitor network copied exactly from the manufacturer application
+   circuit, plus local VDD decoupling.
+3. A current-limited backlight path, preferably a transistor/MOSFET switch if
+   software control is wanted.
+4. Clear ESP carrier-board silkscreen photos so five free GPIOs can be selected
+   without colliding with native USB, flash, PSRAM, or boot straps.
 
+With power disconnected, the eventual logic wiring is:
+
+| Carrier net | Destination |
+|---|---|
+| 3V3 | LCD VDD and the carrier's required high-level straps |
+| GND | LCD VSS and ESP GND |
+| LCD_SI | FPC 18 (D7/SI) |
+| LCD_SCLK | FPC 19 (D6/SCL) |
+| LCD_A0 | FPC 28 |
+| LCD_RESET_N | FPC 29 |
+| LCD_CS_N | FPC 30 |
+
+Do not connect or power the panel until the adapter/capacitor network and ESP
+carrier identity are visible. Once they are, this table can be completed with
+actual ESP GPIO numbers and checked continuity-by-continuity.
