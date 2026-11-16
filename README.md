@@ -27,6 +27,11 @@ The real ESP32-S3 prototype has been built, flashed, and observed through a full
 50 m deviation, recovered from GPS loss, reached `ARRIVED`, and retained stable
 heap usage.
 
+> **UI status:** the simulator is functionally integrated, but its current
+> 128×64 map presentation is too cluttered to be usable. It is a diagnostic
+> prototype, not a finished dashboard. See [docs/HANDOFF.md](docs/HANDOFF.md)
+> for the prioritized redesign work and exact project state.
+
 ## Run the fake screen
 
 Dependencies on macOS: CMake, SDL2, and zlib.
