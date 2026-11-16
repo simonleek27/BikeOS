@@ -1,0 +1,19 @@
+{
+  "source": "OpenStreetMap contributors via Overpass API",
+  "source_url": "https://overpass-api.de/api/interpreter",
+  "license": "ODbL 1.0",
+  "license_url": "https://www.openstreetmap.org/copyright",
+  "generated_utc": "2026-11-16T19:37:12.165467+00:00",
+  "osm_timestamp": "2026-11-16T19:35:36Z",
+  "bbox": [
+    52.3548,
+    4.8775,
+    52.364,
+    4.894
+  ],
+  "road_polylines": 1017,
+  "map_points": 2936,
+  "route_points": 84,
+  "route_distance_m": 1409.7,
+  "maneuvers": 5
+}

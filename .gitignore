@@ -5,6 +5,7 @@ firmware/build/
 firmware/managed_components/
 firmware/sdkconfig
 firmware/sdkconfig.old
+build-host/
 
 # Local editor and environment files
 .idea/
