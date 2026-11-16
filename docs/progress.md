@@ -8,6 +8,7 @@ Updated: 16 November 2026
 | ESP-IDF toolchain | Complete | ESP-IDF v5.5.6 / GCC 14.2.0 passed | N/A | Keep v5.5.6 pinned for reproducible builds |
 | Startup diagnostics | Complete | Build passed; 191 kB image | Boot and 20 stable heartbeats verified | Milestone 1 complete |
 | LCD identification | Not started | N/A | Not wired | Need front/back/label photos before assigning GPIOs |
+| Desktop display simulator | Complete | Chrome render and JavaScript syntax passed | Pixel preview only | Use to refine UI while LCD identification is pending |
 | LCD driver/test | Not started | Not run | Not run | Confirm exact display model and interface first |
 | GPS abstraction | Planned | Not run | Hardware not connected | Implement simulator after bring-up |
 | Navigation engine | Planned | Not run | N/A | Starts after ESP32 bring-up |

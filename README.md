@@ -19,4 +19,5 @@ verified.
 - [docs/hardware-setup.md](docs/hardware-setup.md): verified board facts and hardware setup status.
 - [docs/progress.md](docs/progress.md): implemented, tested, blocked, and remaining work.
 - [firmware/README.md](firmware/README.md): ESP-IDF build, flash, and monitor workflow.
+- [simulator/README.md](simulator/README.md): interactive 400 × 240 monochrome display preview.
 - [brainstorming.md](brainstorming.md): original concept and research backlog. Section 2 is superseded by the architecture doc.
