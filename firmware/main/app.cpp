@@ -9,6 +9,7 @@
 
 #include "subsystem_status.hpp"
 #include "system_diagnostics.hpp"
+#include "navigation_runtime.hpp"
 
 namespace bikeos {
 namespace {
@@ -23,10 +24,15 @@ constexpr TickType_t kHeartbeatPeriod = pdMS_TO_TICKS(1000);
     ESP_LOGI(kTag, "Initializing system...");
     log_system_diagnostics();
     log_initial_subsystem_status();
+    NavigationRuntime navigation;
+    if (!navigation.initialize()) {
+        ESP_LOGE(kTag, "Navigation runtime failed; heartbeat remains active");
+    }
     ESP_LOGI(kTag, "Initialization complete");
 
     while (true) {
         vTaskDelay(kHeartbeatPeriod);
+        navigation.step(uptime_seconds() * 1000ULL);
         ESP_LOGI(kTag,
                  "Heartbeat uptime=%" PRIu64 "s free_heap=%" PRIu32 "B",
                  uptime_seconds(),

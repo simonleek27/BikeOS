@@ -12,9 +12,9 @@ constexpr char kTag[] = "subsystems";
 void log_initial_subsystem_status()
 {
     ESP_LOGI(kTag, "Memory initialized");
-    ESP_LOGI(kTag, "Navigation: foundation ready");
-    ESP_LOGI(kTag, "GPS: simulation mode");
-    ESP_LOGW(kTag, "Display: unavailable (not wired)");
+    ESP_LOGI(kTag, "Navigation: route matching + off-route detection");
+    ESP_LOGI(kTag, "GPS: deterministic simulation mode (UART parser available)");
+    ESP_LOGW(kTag, "Display: virtual 128x64 framebuffer; physical LCD not wired");
     ESP_LOGI(kTag, "BLE: not started");
 }
 

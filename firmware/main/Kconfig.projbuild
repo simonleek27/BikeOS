@@ -1,0 +1,92 @@
+menu "BikeOS hardware"
+
+choice BIKEOS_GPS_SOURCE
+    prompt "GPS source"
+    default BIKEOS_GPS_SIM
+
+config BIKEOS_GPS_SIM
+    bool "Deterministic simulator"
+
+config BIKEOS_GPS_UART
+    bool "TTL UART NMEA receiver"
+
+config BIKEOS_GPS_IPHONE
+    bool "iPhone BLE fixes (transport pending)"
+endchoice
+
+if BIKEOS_GPS_UART
+config BIKEOS_GPS_UART_NUMBER
+    int "UART number"
+    range 0 2
+    default 1
+
+config BIKEOS_GPS_RX_GPIO
+    int "GPS TX -> ESP32 RX GPIO (-1 until verified)"
+    range -1 48
+    default -1
+
+config BIKEOS_GPS_TX_GPIO
+    int "GPS RX <- ESP32 TX GPIO (-1 if unused)"
+    range -1 48
+    default -1
+
+config BIKEOS_GPS_BAUD
+    int "NMEA baud rate"
+    range 1200 921600
+    default 9600
+endif
+
+choice BIKEOS_DISPLAY_TARGET
+    prompt "Display target"
+    default BIKEOS_DISPLAY_VIRTUAL
+
+config BIKEOS_DISPLAY_VIRTUAL
+    bool "Virtual 128x64 framebuffer"
+
+config BIKEOS_DISPLAY_ST7565
+    bool "Physical ST7565R over SPI (requires verified carrier wiring)"
+endchoice
+
+if BIKEOS_DISPLAY_ST7565
+config BIKEOS_LCD_SPI_HOST
+    int "SPI host (1=SPI2, 2=SPI3)"
+    range 1 2
+    default 1
+
+config BIKEOS_LCD_MOSI_GPIO
+    int "LCD D7/SI GPIO (-1 until verified)"
+    range -1 48
+    default -1
+
+config BIKEOS_LCD_CLOCK_GPIO
+    int "LCD D6/SCL GPIO (-1 until verified)"
+    range -1 48
+    default -1
+
+config BIKEOS_LCD_CS_GPIO
+    int "LCD CS1 GPIO (-1 until verified)"
+    range -1 48
+    default -1
+
+config BIKEOS_LCD_A0_GPIO
+    int "LCD A0 GPIO (-1 until verified)"
+    range -1 48
+    default -1
+
+config BIKEOS_LCD_RESET_GPIO
+    int "LCD /RES GPIO (-1 until verified)"
+    range -1 48
+    default -1
+
+config BIKEOS_LCD_CONTRAST
+    int "ST7565 electronic volume"
+    range 0 63
+    default 24
+
+config BIKEOS_LCD_COLUMN_OFFSET
+    int "Panel RAM column offset"
+    range 0 131
+    default 0
+endif
+
+endmenu
