@@ -2,6 +2,11 @@
 
 > Status: agreed direction as of 4 November 2026 (ND and Simon). Supersedes section 2 of `brainstorming.md`.
 > Both bikes are non-electric Swapfiets bikes, so there is no e-bike battery or dynamo to integrate with for v1.
+>
+> Hardware bring-up update, 16 November 2026: the ESP32 and LCD are physically
+> on hand. The ESP32 is connected and ROM-verified as an ESP32-S3 with 16 MB
+> flash and 8 MB PSRAM. The LCD is not wired and its physical model/revision
+> must be verified before pin assignment.
 
 ## The one-line version
 
@@ -26,7 +31,7 @@ Moving GPS to the ESP removes both. The phone's only background job is answering
 
 | Part | Pick | Why | Where |
 |---|---|---|---|
-| MCU | ESP32-S3, 8 MB flash / 8 MB PSRAM (DevKitC-1 N8R8 to prototype; a board with LiPo charging such as Seeed XIAO ESP32S3 or Adafruit Feather ESP32-S3 for the bike) | BLE 5, enough RAM for a framebuffer and route, cheap | TinyTronics ~€18 |
+| MCU | ESP32-S3. The connected prototype measures **16 MB flash / 8 MB PSRAM**; exact module/carrier SKU awaits a silkscreen photo. A board with LiPo charging such as Seeed XIAO ESP32S3 or Adafruit Feather ESP32-S3 remains an option for the bike. | BLE 5, enough RAM for a framebuffer and route, cheap | Prototype physically on hand |
 | Display | **Adafruit SHARP Memory Display Breakout 2.7" 400x240** (product 4694, Sharp LS027B7DH01) | Reflective, so readable in direct sun with no backlight; draws under 1 mA; 3-wire SPI; breakout handles the 0.5 mm flex and supply; viewable 58.8 x 35.3 mm | Opencircuit (NL) €61.50, 10 to 12 days; The Pi Hut £43 plus UK import |
 | Display, bigger option later | Sharp LS044Q7DH01 4.4" 320x240, viewable 90.8 x 68.4 mm | Same tech, larger; no breakout exists, bare panel plus own flex adapter | DigiKey ~€55 |
 | Front light | Two small white LEDs in the top bezel angled across the glass, or an edge-lit acrylic strip, on a GPIO | Memory LCDs have no backlight and the transmissive fraction (0.35 percent) is useless for one; Amsterdam is dark by 17:00 in winter | Any |

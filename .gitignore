@@ -1,0 +1,13 @@
+.DS_Store
+
+# ESP-IDF generated files
+firmware/build/
+firmware/managed_components/
+firmware/sdkconfig
+firmware/sdkconfig.old
+
+# Local editor and environment files
+.idea/
+.vscode/
+*.swp
+
