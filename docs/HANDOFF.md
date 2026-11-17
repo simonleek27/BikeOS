@@ -2,15 +2,14 @@
 
 ## Read this first
 
-The navigation stack works, but the current 128×64 interface does not. The
-latest user review was that the fake screen is effectively impossible to read.
-Treat display readability as the first task—not as polish to defer until after
-BLE or the iPhone app.
+The navigation stack and redesigned 128×64 interface work in the shared
+host/ESP framebuffer. Display readability was the first task; BLE and the
+iPhone app remain intentionally behind it.
 
 Repository state at handoff:
 
 - Branch: `codex/navigation-map`
-- Working tree: clean when this handoff was written
+- Working tree: clean after the redesign commit
 - ESP firmware: BikeOS 0.2.0
 - Toolchain: ESP-IDF 5.5.6
 - Host build: CMake + C++20 + SDL2 + zlib
@@ -33,6 +32,10 @@ Recent logical commits:
   persistent off-route detection, reroute throttling, and GPS-loss recovery.
 - Exact 128×64 ST7565 page-major framebuffer shared by firmware and simulator.
 - Native SDL simulator with live controls and deterministic PNG export.
+- Exact 128×64 logical SDL surface with centered nearest-neighbor scaling,
+  resize-safe letterboxing, native/4×/8× snapshots, road filtering, named
+  maneuver banners, route halo/emphasis, large rider marker, and automatic
+  zoom hysteresis/smoothing.
 - Physical ESP32 flash and serial verification. The board completed the 1.41 km
   simulated route, entered `REROUTING` after a 50 m deviation, recovered from
   `GPS_LOST`, reached `ARRIVED`, and kept stable free heap.
@@ -41,36 +44,29 @@ Recent logical commits:
 
 ## What is not complete
 
-- The screen layout is not readable enough for riding.
 - The LCD has not been electrically connected or observed displaying pixels.
 - UART GPS is implemented but has not been tested with a physical receiver.
 - BLE route/map transfer is not implemented.
 - The iPhone app is not implemented.
 - No outdoor road test has happened.
 
-Do not describe the simulator as a completed UI or the LCD as physically
-integrated.
+Do not describe the LCD as physically integrated; its panel is still unwired.
 
-## First task: make 128×64 readable
+## Display design notes
 
 The current renderer draws geographically correct data, but accuracy alone
 does not produce a usable navigation display. At this resolution, the map must
 be aggressively selective.
 
-Recommended changes, in order:
+The current renderer implements the following acceptance-oriented composition:
 
-1. Reserve a fixed 12–16 pixel status band and never let map geometry enter it.
-2. Show only route-adjacent streets. Hide footways/service roads at normal zoom
-   and introduce road-class/zoom visibility thresholds.
-3. Increase route separation: clear a narrow halo underneath it, then draw a
-   strong 3-pixel route line.
-4. Keep a large, unmistakable rider marker near the center. A filled 7×9 arrow
-   with a cleared halo is a reasonable starting point.
-5. Replace the 3×5 status font with a deliberately designed 5×7 subset for
-   digits, distance units, GPS/BLE state, and maneuver labels.
-6. Prefer maneuver information over street density. When a turn is close,
-   switch to a large arrow + distance view if the map cannot remain legible.
-7. Test at **actual 128×64 size**, not only the 8× SDL window.
+1. Reserve top instruction and bottom maneuver/status bands and clip all map
+   geometry to the middle map region.
+2. Hide service/footway roads and unnamed minor cycleways; keep the active route
+   on a cleared halo with a stronger ahead segment and intersection marker.
+3. Use a large rider arrow, 5×7 labels, automatic zoom bands with hysteresis and
+   smoothing, and a dedicated turn-now two-line street view.
+4. Test at actual 128×64 size plus 4×/8× nearest-neighbor exports.
 
 Acceptance criteria:
 

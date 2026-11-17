@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <vector>
 
 #include "bikeos/geo.hpp"
@@ -21,12 +22,14 @@ enum class RoadClass : std::uint8_t {
 };
 
 struct RoadPolyline {
+    std::uint32_t feature_id{};
     RoadClass road_class{RoadClass::other};
+    std::string name;
     std::vector<GeoPointE7> points;
 };
 
 struct MapDataset {
-    std::uint16_t version{1};
+    std::uint16_t version{3};
     GeoPointE7 origin{};
     GeoPointE7 minimum{};
     GeoPointE7 maximum{};

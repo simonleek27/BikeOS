@@ -1,4 +1,5 @@
 #include <cmath>
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -145,14 +146,18 @@ void test_map_codec_and_rendering()
 {
     const auto route = make_route();
     bikeos::MapDataset map{
-        .version = 1,
+        .version = 3,
         .origin = route.points.front(),
         .minimum = offset(route.points.front(), -200, -200),
         .maximum = offset(route.points.front(), 200, 300),
         .roads = {
-            {.road_class = bikeos::RoadClass::residential,
+            {.feature_id = 1234,
+             .road_class = bikeos::RoadClass::residential,
+             .name = "TESTSTRAAT",
              .points = {offset(route.points.front(), -100, 100), offset(route.points.front(), 150, 100)}},
-            {.road_class = bikeos::RoadClass::cycleway,
+            {.feature_id = 5678,
+             .road_class = bikeos::RoadClass::cycleway,
+             .name = "FIETSPAD",
              .points = {offset(route.points.front(), 0, -100), offset(route.points.front(), 0, 250)}},
         },
     };
@@ -161,6 +166,11 @@ void test_map_codec_and_rendering()
     bikeos::MapDataset decoded;
     CHECK(bikeos::decode_map(encoded, decoded));
     CHECK(decoded.point_count() == 4);
+    CHECK(decoded.version == 3);
+    CHECK(decoded.roads[0].feature_id == 1234);
+    CHECK(decoded.roads[0].name == "TESTSTRAAT");
+    CHECK(decoded.roads[1].feature_id == 5678);
+    CHECK(decoded.roads[1].name == "FIETSPAD");
     auto corrupt = encoded;
     corrupt.back() ^= 0x80;
     CHECK(!bikeos::decode_map(corrupt, decoded));
@@ -178,6 +188,14 @@ void test_map_codec_and_rendering()
     }
     CHECK(pixels > 500);
     CHECK(pixels < 7000);
+    CHECK(std::abs(bikeos::MapRenderer::zoom_for_distance(250.0F) - 6.0F) < 0.01F);
+    CHECK(std::abs(bikeos::MapRenderer::zoom_for_distance(100.0F) - 4.5F) < 0.01F);
+    CHECK(std::abs(bikeos::MapRenderer::zoom_for_distance(50.0F) - 3.2F) < 0.01F);
+    CHECK(std::abs(bikeos::MapRenderer::zoom_for_distance(10.0F) - 2.2F) < 0.01F);
+    renderer.render(framebuffer, map, route.points, nav,
+                    {.center = nav.position, .meters_per_pixel = 4.0F},
+                    {.mode = bikeos::DisplayMode::turn_now});
+    CHECK(bikeos::crc32(framebuffer.bytes()) != 0);
     framebuffer.set_pixel(-1, -1);
     framebuffer.set_pixel(128, 64);
     CHECK(framebuffer.bytes().size() == 1024);
@@ -216,11 +234,16 @@ void test_amsterdam_assets()
     bikeos::Route route;
     CHECK(bikeos::decode_map(read(BIKEOS_SOURCE_DIR "/data/amsterdam_demo.bmap"), map));
     CHECK(bikeos::decode_route(read(BIKEOS_SOURCE_DIR "/data/amsterdam_demo.brte"), route));
+    CHECK(map.version == 3);
     CHECK(map.roads.size() == 1017);
     CHECK(map.point_count() == 2936);
     CHECK(route.points.size() == 84);
     CHECK(route.maneuvers.size() == 5);
     CHECK(route.total_distance_m > 1400.0F && route.total_distance_m < 1420.0F);
+    CHECK(std::any_of(map.roads.begin(), map.roads.end(), [](const auto& road) { return !road.name.empty(); }));
+    CHECK(std::all_of(route.maneuvers.begin(), route.maneuvers.end(), [](const auto& maneuver) {
+        return !maneuver.street_name.empty() && maneuver.street_name != "Destination";
+    }));
 
     bikeos::NavigationEngine navigation;
     CHECK(navigation.set_route(route));

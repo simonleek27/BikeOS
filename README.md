@@ -18,7 +18,8 @@ both the ESP-IDF firmware and the native desktop simulator. It currently has:
   state handling;
 - a 1,024-byte ST7565 page framebuffer and moving-map renderer;
 - a native SDL fake-screen demo using the exact same C++ renderer and assets as
-  the firmware;
+  the firmware, with a true 128×64 logical surface, readable maneuver bands,
+  named streets, automatic zoom smoothing, and native/4×/8× snapshot export;
 - an ESP-IDF ST7565R SPI transport with GPIOs deliberately unset until the
   carrier wiring is built and checked.
 
@@ -27,10 +28,9 @@ The real ESP32-S3 prototype has been built, flashed, and observed through a full
 50 m deviation, recovered from GPS loss, reached `ARRIVED`, and retained stable
 heap usage.
 
-> **UI status:** the simulator is functionally integrated, but its current
-> 128×64 map presentation is too cluttered to be usable. It is a diagnostic
-> prototype, not a finished dashboard. See [docs/HANDOFF.md](docs/HANDOFF.md)
-> for the prioritized redesign work and exact project state.
+> **UI status:** the redesigned renderer has been visually checked at native
+> 128×64 and 4×/8× nearest-neighbor scales. The LCD is not wired yet, so the
+> physical panel still needs its verified FPC carrier and pinout.
 
 ## Run the fake screen
 
@@ -42,9 +42,9 @@ cmake --build build-host -j
 ./build-host/bikeos_simulator
 ```
 
-Controls: `Space` pause, `R` reset, `+/-` speed, `[`/`]` zoom, `O` force an
-off-route event, `G` force GPS loss, `V` toggle the route, `S` save a PNG, and
-`Esc` quit.
+Controls: `Space` pause, `R` reset, `+/-` speed, `[`/`]` manual zoom, `A` auto
+zoom, `M` display mode, `O` force an off-route event, `G` force GPS loss, `V`
+toggle the route, `S` save a PNG, and `Esc` quit.
 
 To export deterministic PNGs without opening a window:
 

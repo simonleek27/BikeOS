@@ -10,7 +10,7 @@ namespace bikeos {
 namespace {
 
 constexpr std::array<std::uint8_t, 4> kMagic{'B', 'M', 'A', 'P'};
-constexpr std::uint16_t kFormatVersion = 1;
+constexpr std::uint16_t kFormatVersion = 3;
 constexpr std::int32_t kQuantizationE7 = 10;  // 1e-6 degrees.
 
 template <typename T>
@@ -48,14 +48,14 @@ std::size_t MapDataset::point_count() const
 
 bool MapDataset::valid() const
 {
-    if (version != kFormatVersion || !valid_coordinate(origin) || !valid_coordinate(minimum) ||
+    if ((version < 1 || version > kFormatVersion) || !valid_coordinate(origin) || !valid_coordinate(minimum) ||
         !valid_coordinate(maximum) || minimum.latitude_e7 > maximum.latitude_e7 ||
         minimum.longitude_e7 > maximum.longitude_e7 || roads.size() > 65535 ||
         point_count() > 1000000) {
         return false;
     }
     for (const auto& road : roads) {
-        if (road.points.size() < 2 || road.points.size() > 65535 ||
+        if (road.points.size() < 2 || road.points.size() > 65535 || road.name.size() > 96 ||
             !std::all_of(road.points.begin(), road.points.end(), valid_coordinate)) {
             return false;
         }
@@ -89,11 +89,23 @@ std::vector<std::uint8_t> encode_map(const MapDataset& map)
 {
     if (!map.valid()) return {};
     std::vector<std::uint8_t> payload;
-    payload.reserve(map.point_count() * 4 + map.roads.size() * 4);
+    std::vector<std::string> names;
+    names.reserve(map.roads.size());
+    for (const auto& road : map.roads) {
+        if (std::find(names.begin(), names.end(), road.name) == names.end()) names.push_back(road.name);
+    }
+    if (names.size() > 65535) return {};
+    payload.reserve(map.point_count() * 4 + map.roads.size() * 9 + names.size() * 8);
+    append_le(payload, static_cast<std::uint16_t>(names.size()));
+    for (const auto& name : names) {
+        append_le(payload, static_cast<std::uint8_t>(name.size()));
+        payload.insert(payload.end(), name.begin(), name.end());
+    }
     for (const auto& road : map.roads) {
         append_le(payload, static_cast<std::uint8_t>(road.road_class));
-        append_le(payload, static_cast<std::uint8_t>(0));
+        append_le(payload, road.feature_id);
         append_le(payload, static_cast<std::uint16_t>(road.points.size()));
+        append_le(payload, static_cast<std::uint16_t>(std::find(names.begin(), names.end(), road.name) - names.begin()));
         for (const auto point : road.points) {
             append_le(payload, static_cast<std::int16_t>((point.latitude_e7 - map.origin.latitude_e7) /
                                                          kQuantizationE7));
@@ -143,23 +155,63 @@ bool decode_map(const std::span<const std::uint8_t> encoded, MapDataset& output)
         !read_le(encoded, offset, payload_size) || !read_le(encoded, offset, expected_crc)) {
         return false;
     }
-    if (version != kFormatVersion || flags != 0 || road_count > 65535 || expected_points > 1000000 ||
+    if ((version < 1 || version > kFormatVersion) || flags != 0 || road_count > 65535 || expected_points > 1000000 ||
         payload_size != encoded.size() - offset || crc32(encoded.subspan(offset)) != expected_crc) {
         return false;
     }
     candidate.version = version;
     candidate.roads.reserve(road_count);
     std::size_t decoded_points = 0;
+    std::vector<std::string> names;
+    if (version == 3) {
+        std::uint16_t name_count = 0;
+        if (!read_le(encoded, offset, name_count)) return false;
+        names.reserve(name_count);
+        for (std::uint16_t i = 0; i < name_count; ++i) {
+            std::uint8_t name_length = 0;
+            if (!read_le(encoded, offset, name_length) || name_length > 96 || offset + name_length > encoded.size()) {
+                return false;
+            }
+            names.emplace_back(reinterpret_cast<const char*>(encoded.data() + offset), name_length);
+            offset += name_length;
+        }
+    }
     for (std::uint32_t road_index = 0; road_index < road_count; ++road_index) {
         std::uint8_t road_class = 0;
-        std::uint8_t reserved = 0;
+        std::uint8_t name_length = 0;
+        std::uint32_t feature_id = 0;
         std::uint16_t point_count = 0;
-        if (!read_le(encoded, offset, road_class) || !read_le(encoded, offset, reserved) ||
-            !read_le(encoded, offset, point_count) || reserved != 0 || point_count < 2 || road_class > 7) {
-            return false;
+        std::uint16_t name_index = 0;
+        if (!read_le(encoded, offset, road_class)) return false;
+        if (version == 1) {
+            if (!read_le(encoded, offset, name_length) || !read_le(encoded, offset, point_count) || name_length != 0) {
+                return false;
+            }
+        } else if (version == 2) {
+            if (!read_le(encoded, offset, name_length) || !read_le(encoded, offset, feature_id) ||
+                !read_le(encoded, offset, point_count) || name_length > 96 || offset + name_length > encoded.size()) {
+                return false;
+            }
+        } else {
+            if (!read_le(encoded, offset, feature_id) || !read_le(encoded, offset, point_count) ||
+                !read_le(encoded, offset, name_index) || name_index >= names.size()) {
+                return false;
+            }
         }
+        if (point_count < 2 || road_class > 7) return false;
         RoadPolyline road;
+        road.feature_id = feature_id;
         road.road_class = static_cast<RoadClass>(road_class);
+        if (version == 2) {
+            road.name = std::string(reinterpret_cast<const char*>(encoded.data() + offset), name_length);
+            offset += name_length;
+        } else if (version == 3) {
+            road.name = names[name_index];
+        } else {
+            // Version 1 used the second byte as a reserved field and had no
+            // names. Keep old assets decodable for deliberate migration.
+            if (name_length != 0) return false;
+        }
         road.points.reserve(point_count);
         for (std::uint16_t point_index = 0; point_index < point_count; ++point_index) {
             std::int16_t lat_offset = 0;

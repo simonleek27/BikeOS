@@ -212,7 +212,7 @@ def route_maneuvers(points, street_names):
             maneuver_type = 4 if magnitude < 50 else (2 if magnitude < 120 else 6)
         maneuvers.append((index, maneuver_type, street_names[min(index, len(street_names) - 1)]))
         last_maneuver = index
-    maneuvers.append((len(points) - 1, 9, "Destination"))
+    maneuvers.append((len(points) - 1, 9, street_names[-1] if street_names else ""))
     return maneuvers
 
 
@@ -233,12 +233,22 @@ def encode_map(roads):
     payload = bytearray()
     point_count = 0
     encoded_roads = []
+    names = []
     for road in roads:
         points = simplify(road["points"], 1.5)
         if len(points) >= 2:
-            encoded_roads.append((road["class"], points))
-    for road_class, points in encoded_roads:
-        payload += struct.pack("<BBH", road_class, 0, len(points))
+            name = road["name"]
+            name = name.encode("utf-8")[:96].decode("utf-8", errors="ignore")
+            if name not in names:
+                names.append(name)
+            encoded_roads.append((road["id"], road["class"], names.index(name), points))
+    payload += struct.pack("<H", len(names))
+    for name in names:
+        name_bytes = name.encode("utf-8")
+        payload += struct.pack("<B", len(name_bytes))
+        payload += name_bytes
+    for feature_id, road_class, name_index, points in encoded_roads:
+        payload += struct.pack("<BIHH", road_class, feature_id, len(points), name_index)
         for point in points:
             latitude, longitude = e7(point)
             payload += struct.pack(
@@ -249,7 +259,7 @@ def encode_map(roads):
         point_count += len(points)
     header = struct.pack(
         "<4sHHiiiiiiIIII",
-        b"BMAP", 1, 0,
+        b"BMAP", 3, 0,
         origin[0], origin[1],
         round(south * 1e7), round(west * 1e7), round(north * 1e7), round(east * 1e7),
         len(encoded_roads), point_count, len(payload), binascii.crc32(payload) & 0xFFFFFFFF,

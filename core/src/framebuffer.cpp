@@ -12,6 +12,11 @@ struct Glyph {
     std::array<std::uint8_t, 3> columns;
 };
 
+struct Glyph5x7 {
+    char character;
+    std::array<std::uint8_t, 5> columns;
+};
+
 constexpr std::array<Glyph, 44> kGlyphs{{
     {' ', {0, 0, 0}}, {'-', {4, 4, 4}}, {'.', {0, 0, 16}}, {'/', {24, 4, 3}},
     {'0', {31, 17, 31}}, {'1', {0, 31, 0}}, {'2', {29, 21, 23}}, {'3', {21, 21, 31}},
@@ -26,6 +31,26 @@ constexpr std::array<Glyph, 44> kGlyphs{{
     {'?', {1, 21, 3}}, {'<', {4, 10, 17}}, {'>', {17, 10, 4}}, {'^', {2, 1, 2}},
 }};
 
+constexpr std::array<Glyph5x7, 45> kGlyphs5x7{{
+    {' ', {0, 0, 0, 0, 0}}, {'-', {8, 8, 8, 8, 8}}, {'.', {0, 0, 0, 0, 16}},
+    {'/', {16, 8, 4, 2, 1}}, {'>', {4, 2, 1, 2, 4}}, {'<', {4, 8, 16, 8, 4}},
+    {'^', {4, 2, 31, 2, 4}},
+    {'0', {31, 17, 17, 17, 31}}, {'1', {0, 18, 31, 16, 0}}, {'2', {18, 25, 21, 19, 18}},
+    {'3', {17, 17, 21, 21, 31}}, {'4', {7, 4, 4, 31, 4}}, {'5', {23, 21, 21, 21, 13}},
+    {'6', {15, 21, 21, 21, 9}}, {'7', {1, 1, 25, 5, 3}}, {'8', {10, 21, 21, 21, 10}},
+    {'9', {18, 21, 21, 21, 30}},
+    {'A', {30, 5, 5, 5, 30}}, {'B', {31, 21, 21, 21, 10}}, {'C', {14, 17, 17, 17, 10}},
+    {'D', {31, 17, 17, 17, 14}}, {'E', {31, 21, 21, 21, 17}}, {'F', {31, 5, 5, 5, 1}},
+    {'G', {14, 17, 21, 21, 28}}, {'H', {31, 4, 4, 4, 31}}, {'I', {17, 17, 31, 17, 17}},
+    {'J', {8, 16, 16, 16, 15}}, {'K', {31, 4, 10, 17, 17}}, {'L', {31, 16, 16, 16, 16}},
+    {'M', {31, 2, 4, 2, 31}}, {'N', {31, 2, 4, 8, 31}}, {'O', {14, 17, 17, 17, 14}},
+    {'P', {31, 5, 5, 5, 2}}, {'Q', {14, 17, 21, 9, 22}}, {'R', {31, 5, 13, 21, 18}},
+    {'S', {18, 21, 21, 21, 9}}, {'T', {1, 1, 31, 1, 1}}, {'U', {15, 16, 16, 16, 15}},
+    {'V', {7, 8, 16, 8, 7}}, {'W', {31, 8, 4, 8, 31}}, {'X', {17, 10, 4, 10, 17}},
+    {'Y', {1, 2, 28, 2, 1}}, {'Z', {17, 25, 21, 19, 17}}, {'?', {1, 1, 21, 5, 2}},
+    {'!', {0, 0, 31, 0, 0}},
+}};
+
 std::array<std::uint8_t, 3> glyph_for(char character)
 {
     if (character >= 'a' && character <= 'z') character = static_cast<char>(character - 'a' + 'A');
@@ -33,6 +58,13 @@ std::array<std::uint8_t, 3> glyph_for(char character)
         if (glyph.character == character) return glyph.columns;
     }
     return {1, 21, 3};
+}
+
+std::array<std::uint8_t, 5> glyph5x7_for(char character)
+{
+    if (character >= 'a' && character <= 'z') character = static_cast<char>(character - 'a' + 'A');
+    for (const auto& glyph : kGlyphs5x7) if (glyph.character == character) return glyph.columns;
+    return {1, 1, 21, 5, 2};
 }
 
 }  // namespace
@@ -104,6 +136,24 @@ void Framebuffer::text_3x5(int x, const int y, const std::string_view text, cons
         }
         x += 3 + spacing;
     }
+}
+
+void Framebuffer::text_5x7(int x, const int y, const std::string_view text, const bool on, const int spacing)
+{
+    for (const char character : text) {
+        const auto glyph = glyph5x7_for(character);
+        for (int column = 0; column < 5; ++column) {
+            for (int row = 0; row < 7; ++row) {
+                if ((glyph[column] & (1U << row)) != 0) set_pixel(x + column, y + row, on);
+            }
+        }
+        x += 5 + spacing;
+    }
+}
+
+int Framebuffer::text_5x7_width(const std::string_view text, const int spacing)
+{
+    return text.empty() ? 0 : static_cast<int>(text.size()) * 5 + static_cast<int>(text.size() - 1) * spacing;
 }
 
 const std::array<std::uint8_t, Framebuffer::byte_count>& Framebuffer::bytes() const { return data_; }

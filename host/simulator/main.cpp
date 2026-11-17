@@ -36,7 +36,7 @@ bool load_assets(const std::filesystem::path& data_dir, bikeos::MapDataset& map,
            bikeos::decode_route(route_bytes, route);
 }
 
-void render_pixels(SDL_Renderer* renderer, const bikeos::Framebuffer& framebuffer, const int scale)
+void render_pixels(SDL_Renderer* renderer, const bikeos::Framebuffer& framebuffer)
 {
     SDL_SetRenderDrawColor(renderer, 9, 40, 94, 255);
     SDL_RenderClear(renderer);
@@ -44,7 +44,7 @@ void render_pixels(SDL_Renderer* renderer, const bikeos::Framebuffer& framebuffe
     for (int y = 0; y < bikeos::Framebuffer::height; ++y) {
         for (int x = 0; x < bikeos::Framebuffer::width; ++x) {
             if (!framebuffer.pixel(x, y)) continue;
-            const SDL_Rect pixel{x * scale, y * scale, scale, scale};
+            const SDL_Rect pixel{x, y, 1, 1};
             SDL_RenderFillRect(renderer, &pixel);
         }
     }
@@ -52,19 +52,49 @@ void render_pixels(SDL_Renderer* renderer, const bikeos::Framebuffer& framebuffe
 }
 
 void render_frame(bikeos::Framebuffer& framebuffer,
+                  bikeos::MapRenderer& renderer,
                   const bikeos::MapDataset& map,
                   const bikeos::Route& route,
                   const bikeos::NavigationSnapshot& navigation,
                   const float zoom,
-                  const bool show_route)
+                  const bool show_route,
+                  const bikeos::DisplayMode mode,
+                  const bool automatic_zoom = true)
 {
-    bikeos::MapRenderer renderer;
     renderer.render(framebuffer, map, route.points, navigation,
                     {.center = navigation.gps_valid ? navigation.position : route.points.front(),
                      .meters_per_pixel = zoom,
                      .heading_up = false,
-                     .heading_deg = navigation.heading_deg},
-                    {.show_route = show_route, .show_status = true});
+                     .heading_deg = navigation.heading_deg,
+                     .automatic_zoom = automatic_zoom},
+                    {.show_route = show_route, .show_status = true, .mode = mode});
+}
+
+void write_snapshot_set(const std::filesystem::path& output_dir,
+                        const std::string& name,
+                        const bikeos::Framebuffer& framebuffer)
+{
+    write_framebuffer_png(output_dir / (name + ".png"), framebuffer, 1);
+    write_framebuffer_png(output_dir / (name + "-4x.png"), framebuffer, 4);
+    write_framebuffer_png(output_dir / (name + "-8x.png"), framebuffer, 8);
+}
+
+bool snapshot_at_distance(const bikeos::Route& route,
+                          const float target_progress,
+                          bikeos::NavigationEngine& navigation,
+                          bikeos::GpsSimulator& simulator,
+                          bikeos::NavigationSnapshot& snapshot)
+{
+    navigation.set_route(route);
+    simulator.set_route(route);
+    simulator.set_speed_mps(7.0F);
+    simulator.set_events({});
+    for (std::uint64_t step = 1; step < 300; ++step) {
+        const auto fix = simulator.step(step * 1000);
+        snapshot = navigation.update(fix, true, step * 1000);
+        if (simulator.progress_m() >= target_progress) return true;
+    }
+    return false;
 }
 
 int export_snapshots(const std::filesystem::path& output_dir,
@@ -73,6 +103,7 @@ int export_snapshots(const std::filesystem::path& output_dir,
 {
     std::filesystem::create_directories(output_dir);
     bikeos::Framebuffer framebuffer;
+    bikeos::MapRenderer renderer;
     bikeos::NavigationEngine navigation;
     bikeos::GpsSimulator simulator(0xB14E05U);
     navigation.set_route(route);
@@ -86,8 +117,29 @@ int export_snapshots(const std::filesystem::path& output_dir,
         navigation.update(fix, true, now);
         now += 1000;
     }
-    render_frame(framebuffer, map, route, navigation.snapshot(), 4.0F, true);
-    if (!write_framebuffer_png(output_dir / "navigating.png", framebuffer, 6)) return 1;
+    render_frame(framebuffer, renderer, map, route, navigation.snapshot(), 4.0F, true, bikeos::DisplayMode::normal);
+    write_snapshot_set(output_dir, "normal-navigation", framebuffer);
+
+    std::size_t maneuver_number = 0;
+    for (const auto& maneuver : route.maneuvers) {
+        if (maneuver.type == bikeos::ManeuverType::destination) continue;
+        ++maneuver_number;
+        const float progress = route.cumulative_distance_m[maneuver.point_index];
+        bikeos::NavigationSnapshot maneuver_snapshot;
+        if (!snapshot_at_distance(route, std::max(0.0F, progress - 55.0F), navigation, simulator, maneuver_snapshot)) continue;
+        const std::string stem = maneuver.type == bikeos::ManeuverType::left ||
+                                         maneuver.type == bikeos::ManeuverType::slight_left ||
+                                         maneuver.type == bikeos::ManeuverType::sharp_left
+                                     ? "approaching-left-turn"
+                                     : "approaching-right-turn";
+        render_frame(framebuffer, renderer, map, route, maneuver_snapshot, 4.0F, true, bikeos::DisplayMode::approaching);
+        write_snapshot_set(output_dir, stem, framebuffer);
+        write_snapshot_set(output_dir, stem + "-" + std::to_string(maneuver_number), framebuffer);
+        snapshot_at_distance(route, std::max(0.0F, progress - 8.0F), navigation, simulator, maneuver_snapshot);
+        render_frame(framebuffer, renderer, map, route, maneuver_snapshot, 4.0F, true, bikeos::DisplayMode::turn_now);
+        write_snapshot_set(output_dir, "turn-now", framebuffer);
+        write_snapshot_set(output_dir, "turn-now-" + std::to_string(maneuver_number), framebuffer);
+    }
 
     simulator.set_events({{simulator.progress_m(), simulator.progress_m() + 90.0F,
                            bikeos::SimulationEventType::off_route, 55.0F}});
@@ -96,12 +148,12 @@ int export_snapshots(const std::filesystem::path& output_dir,
         navigation.update(fix, true, now);
         now += 1000;
     }
-    render_frame(framebuffer, map, route, navigation.snapshot(), 4.0F, true);
-    if (!write_framebuffer_png(output_dir / "rerouting.png", framebuffer, 6)) return 1;
+    render_frame(framebuffer, renderer, map, route, navigation.snapshot(), 4.0F, true, bikeos::DisplayMode::normal);
+    write_snapshot_set(output_dir, "rerouting", framebuffer);
 
     navigation.update(std::nullopt, true, now);
-    render_frame(framebuffer, map, route, navigation.snapshot(), 4.0F, true);
-    if (!write_framebuffer_png(output_dir / "gps-lost.png", framebuffer, 6)) return 1;
+    render_frame(framebuffer, renderer, map, route, navigation.snapshot(), 4.0F, true, bikeos::DisplayMode::normal);
+    write_snapshot_set(output_dir, "gps-lost", framebuffer);
 
     const bikeos::GpsFix arrival{
         .position = route.points.back(),
@@ -116,8 +168,8 @@ int export_snapshots(const std::filesystem::path& output_dir,
         .heading_valid = false,
     };
     navigation.update(arrival, true, now);
-    render_frame(framebuffer, map, route, navigation.snapshot(), 4.0F, true);
-    if (!write_framebuffer_png(output_dir / "arrived.png", framebuffer, 6)) return 1;
+    render_frame(framebuffer, renderer, map, route, navigation.snapshot(), 4.0F, true, bikeos::DisplayMode::normal);
+    write_snapshot_set(output_dir, "arrived", framebuffer);
     std::cout << "Exported BikeOS framebuffer snapshots to " << output_dir << '\n';
     return 0;
 }
@@ -155,13 +207,15 @@ int main(int argc, char** argv)
                                            SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                            bikeos::Framebuffer::width * scale,
                                            bikeos::Framebuffer::height * scale,
-                                           SDL_WINDOW_ALLOW_HIGHDPI);
+                                           SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_RESIZABLE);
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (!window || !renderer) {
         std::cerr << "SDL window failed: " << SDL_GetError() << '\n';
         SDL_Quit();
         return 1;
     }
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+    SDL_RenderSetLogicalSize(renderer, bikeos::Framebuffer::width, bikeos::Framebuffer::height);
 
     bikeos::NavigationEngine navigation;
     bikeos::GpsSimulator simulator(0xB14E05U);
@@ -176,11 +230,14 @@ int main(int argc, char** argv)
     });
 
     bikeos::Framebuffer framebuffer;
+    bikeos::MapRenderer map_renderer;
     bool running = true;
     bool paused = false;
     bool show_route = true;
     float zoom = 4.0F;
     float speed_multiplier = 1.0F;
+    bool automatic_zoom = true;
+    bikeos::DisplayMode display_mode = bikeos::DisplayMode::automatic;
     std::uint64_t simulation_ms = 0;
     auto last_step = std::chrono::steady_clock::now();
     std::optional<bikeos::GpsFix> fix;
@@ -201,8 +258,15 @@ int main(int argc, char** argv)
                 case SDLK_EQUALS:
                 case SDLK_PLUS: speed_multiplier = std::min(8.0F, speed_multiplier * 2.0F); break;
                 case SDLK_MINUS: speed_multiplier = std::max(0.25F, speed_multiplier / 2.0F); break;
-                case SDLK_LEFTBRACKET: zoom = std::min(12.0F, zoom + 0.5F); break;
-                case SDLK_RIGHTBRACKET: zoom = std::max(1.0F, zoom - 0.5F); break;
+                case SDLK_LEFTBRACKET: automatic_zoom = false; zoom = std::min(12.0F, zoom + 0.5F); break;
+                case SDLK_RIGHTBRACKET: automatic_zoom = false; zoom = std::max(1.0F, zoom - 0.5F); break;
+                case SDLK_a: automatic_zoom = true; break;
+                case SDLK_m:
+                    display_mode = display_mode == bikeos::DisplayMode::automatic ? bikeos::DisplayMode::normal
+                                   : display_mode == bikeos::DisplayMode::normal ? bikeos::DisplayMode::approaching
+                                   : display_mode == bikeos::DisplayMode::approaching ? bikeos::DisplayMode::turn_now
+                                   : bikeos::DisplayMode::automatic;
+                    break;
                 case SDLK_v: show_route = !show_route; break;
                 case SDLK_o:
                     simulator.set_events({{simulator.progress_m(), simulator.progress_m() + 90.0F,
@@ -212,7 +276,10 @@ int main(int argc, char** argv)
                     simulator.set_events({{simulator.progress_m(), simulator.progress_m() + 55.0F,
                                            bikeos::SimulationEventType::gps_loss, 0.0F}});
                     break;
-                case SDLK_s: write_framebuffer_png("bikeos-screenshot.png", framebuffer, 6); break;
+                case SDLK_s:
+                    write_framebuffer_png("bikeos-screenshot.png", framebuffer, 1);
+                    write_framebuffer_png("bikeos-screenshot-8x.png", framebuffer, 8);
+                    break;
                 default: break;
             }
         }
@@ -225,13 +292,13 @@ int main(int argc, char** argv)
             navigation.update(fix, true, simulation_ms);
             last_step = now;
         }
-        render_frame(framebuffer, map, route, navigation.snapshot(), zoom, show_route);
-        render_pixels(renderer, framebuffer, scale);
+        render_frame(framebuffer, map_renderer, map, route, navigation.snapshot(), zoom, show_route, display_mode, automatic_zoom);
+        render_pixels(renderer, framebuffer);
 
         const auto& state = navigation.snapshot();
         const std::string title = "BikeOS | " + std::string(bikeos::navigation_state_name(state.state)) +
                                   " | " + std::to_string(static_cast<int>(state.route_remaining_m)) +
-                                  " m left | SPACE pause, R reset, +/- speed, [/] zoom, O off-route, G GPS loss";
+                                  " m left | SPACE pause, R reset, +/- speed, [/] zoom, A auto, M view, O off-route, G GPS loss";
         SDL_SetWindowTitle(window, title.c_str());
         std::this_thread::sleep_for(std::chrono::milliseconds(8));
     }
