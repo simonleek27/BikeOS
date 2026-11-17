@@ -7,8 +7,10 @@ firmware/sdkconfig
 firmware/sdkconfig.old
 build-host/
 build-ios/
+build-ios-device/
 build/
 ios/BikeOS.xcodeproj/xcuserdata/
+ios/BikeOS.xcodeproj/project.xcworkspace/
 firmware/sdkconfig.pre_ble
 
 # Local editor and environment files
