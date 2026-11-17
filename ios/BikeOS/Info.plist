@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+<key>CFBundleDisplayName</key><string>BikeOS</string>
+<key>NSBluetoothAlwaysUsageDescription</key><string>BikeOS uses Bluetooth to send routes and receive navigation status from the ESP32 display.</string>
+<key>NSLocationWhenInUseUsageDescription</key><string>BikeOS uses location to preview and follow bicycle routes.</string>
+<key>UIBackgroundModes</key><array><string>bluetooth-central</string></array>
+</dict></plist>

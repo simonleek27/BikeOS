@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#101410" />
+    <title>BikeOS Display Simulator</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="intro">
+        <div>
+          <p class="eyebrow">BIKEOS / DISPLAY LAB</p>
+          <h1>Memory LCD preview</h1>
+        </div>
+        <p class="intro-copy">
+          Pixel-accurate 400 × 240 monochrome preview for the planned reflective display.
+        </p>
+      </header>
+
+      <section class="workspace" aria-label="BikeOS display simulator">
+        <div class="device-column">
+          <div class="device">
+            <div class="device-topline">
+              <span>BIKEOS</span>
+              <span>400 × 240 / 1-BIT</span>
+            </div>
+            <div class="screen-frame">
+              <canvas
+                id="screen"
+                width="400"
+                height="240"
+                role="img"
+                aria-label="Simulated BikeOS navigation display"
+              ></canvas>
+              <div class="screen-glare" aria-hidden="true"></div>
+            </div>
+            <div class="device-footer">
+              <span>REFLECTIVE MEMORY LCD</span>
+              <span id="frameStatus">FRAME 0000</span>
+            </div>
+          </div>
+
+          <p class="hardware-note">
+            This preview models the intended pixels and information hierarchy. Contrast and
+            viewing angle will be validated on the physical LCD after its exact model is confirmed.
+          </p>
+        </div>
+
+        <aside class="control-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">SIMULATION</p>
+              <h2>Amsterdam test ride</h2>
+            </div>
+            <span class="live-pill"><i></i> LIVE</span>
+          </div>
+
+          <label class="field-label" for="stateSelect">Display state</label>
+          <select id="stateSelect">
+            <option value="startup">Startup</option>
+            <option value="waiting-gps">Waiting for GPS</option>
+            <option value="waiting-route">Waiting for route</option>
+            <option value="navigating" selected>Navigating</option>
+            <option value="off-route">Off route</option>
+            <option value="rerouting">Rerouting</option>
+            <option value="phone-disconnected">Phone disconnected</option>
+            <option value="gps-unavailable">GPS unavailable</option>
+            <option value="arrived">Destination reached</option>
+            <option value="error">Error</option>
+          </select>
+
+          <div class="control-grid">
+            <button id="playButton" class="primary-button" type="button">
+              <span id="playIcon">Ⅱ</span>
+              <span id="playLabel">Pause ride</span>
+            </button>
+            <button id="nextButton" type="button">Next event</button>
+          </div>
+
+          <div class="toggle-row">
+            <div>
+              <strong>GPS signal</strong>
+              <span>Simulated outdoor fix</span>
+            </div>
+            <button id="gpsToggle" class="toggle is-on" type="button" aria-pressed="true">
+              <span></span>
+            </button>
+          </div>
+
+          <div class="toggle-row">
+            <div>
+              <strong>Phone link</strong>
+              <span>BLE route connection</span>
+            </div>
+            <button id="bleToggle" class="toggle is-on" type="button" aria-pressed="true">
+              <span></span>
+            </button>
+          </div>
+
+          <div class="telemetry">
+            <div><span>NEXT TURN</span><strong id="distanceReadout">120 m</strong></div>
+            <div><span>ROUTE LEFT</span><strong id="routeReadout">3.8 km</strong></div>
+            <div><span>STATE</span><strong id="stateReadout">ON ROUTE</strong></div>
+          </div>
+
+          <div class="event-log" aria-live="polite">
+            <span class="event-time" id="eventTime">00:00</span>
+            <span id="eventText">Route started — heading toward Museumplein</span>
+          </div>
+        </aside>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

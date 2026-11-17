@@ -1,0 +1,332 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		100000000000000000000080 /* App/BikeOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000070 /* App/BikeOSApp.swift */; };
+		100000000000000000000081 /* Services/BikeOSProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000071 /* Services/BikeOSProtocol.swift */; };
+		100000000000000000000082 /* Services/BikeOSBluetooth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000072 /* Services/BikeOSBluetooth.swift */; };
+		100000000000000000000084 /* amsterdam_demo.bmap in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000075 /* amsterdam_demo.bmap */; };
+		100000000000000000000085 /* BikeOSTests/BikeOSProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000073 /* BikeOSTests/BikeOSProtocolTests.swift */; };
+		100000000000000000000086 /* Services/Routing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000077 /* Services/Routing.swift */; };
+		100000000000000000000087 /* amsterdam_demo.brte in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000076 /* amsterdam_demo.brte */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		F44C17FC30AC964D003B144A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 100000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 100000000000000000000020;
+			remoteInfo = BikeOS;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		100000000000000000000040 /* BikeOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BikeOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		100000000000000000000041 /* BikeOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BikeOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		100000000000000000000070 /* App/BikeOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/BikeOSApp.swift; sourceTree = "<group>"; };
+		100000000000000000000071 /* Services/BikeOSProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/BikeOSProtocol.swift; sourceTree = "<group>"; };
+		100000000000000000000072 /* Services/BikeOSBluetooth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/BikeOSBluetooth.swift; sourceTree = "<group>"; };
+		100000000000000000000073 /* BikeOSTests/BikeOSProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BikeOSTests/BikeOSProtocolTests.swift; sourceTree = "<group>"; };
+		100000000000000000000074 /* BikeOS/Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = BikeOS/Info.plist; sourceTree = "<group>"; };
+		100000000000000000000075 /* amsterdam_demo.bmap */ = {isa = PBXFileReference; lastKnownFileType = archive; name = amsterdam_demo.bmap; path = ../data/amsterdam_demo.bmap; sourceTree = "<group>"; };
+		100000000000000000000076 /* amsterdam_demo.brte */ = {isa = PBXFileReference; lastKnownFileType = archive; name = amsterdam_demo.brte; path = ../data/amsterdam_demo.brte; sourceTree = "<group>"; };
+		100000000000000000000077 /* Services/Routing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Routing.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		100000000000000000000062 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		100000000000000000000065 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		100000000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000030 /* BikeOS */,
+				100000000000000000000031 /* BikeOSTests */,
+				100000000000000000000032 /* DemoData */,
+			);
+			sourceTree = "<group>";
+		};
+		100000000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000040 /* BikeOS.app */,
+				100000000000000000000041 /* BikeOSTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		100000000000000000000030 /* BikeOS */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000070 /* App/BikeOSApp.swift */,
+				100000000000000000000071 /* Services/BikeOSProtocol.swift */,
+				100000000000000000000072 /* Services/BikeOSBluetooth.swift */,
+				100000000000000000000077 /* Services/Routing.swift */,
+			);
+			path = BikeOS;
+			sourceTree = "<group>";
+		};
+		100000000000000000000031 /* BikeOSTests */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000073 /* BikeOSTests/BikeOSProtocolTests.swift */,
+			);
+			path = BikeOSTests;
+			sourceTree = "<group>";
+		};
+		100000000000000000000032 /* DemoData */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000074 /* BikeOS/Info.plist */,
+				100000000000000000000075 /* amsterdam_demo.bmap */,
+				100000000000000000000076 /* amsterdam_demo.brte */,
+			);
+			name = DemoData;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		100000000000000000000020 /* BikeOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 100000000000000000000050 /* Build configuration list for PBXNativeTarget "BikeOS" */;
+			buildPhases = (
+				100000000000000000000060 /* Sources */,
+				100000000000000000000061 /* Resources */,
+				100000000000000000000062 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BikeOS;
+			productName = BikeOS;
+			productReference = 100000000000000000000040 /* BikeOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+		100000000000000000000021 /* BikeOSTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 100000000000000000000051 /* Build configuration list for PBXNativeTarget "BikeOSTests" */;
+			buildPhases = (
+				100000000000000000000063 /* Sources */,
+				100000000000000000000064 /* Resources */,
+				100000000000000000000065 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				100000000000000000000066 /* PBXTargetDependency */,
+			);
+			name = BikeOSTests;
+			productName = BikeOSTests;
+			productReference = 100000000000000000000041 /* BikeOSTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		100000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastUpgradeCheck = 2630;
+			};
+			buildConfigurationList = 100000000000000000000010 /* Build configuration list for PBXProject "BikeOS" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 100000000000000000000002;
+			productRefGroup = 100000000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				100000000000000000000020 /* BikeOS */,
+				100000000000000000000021 /* BikeOSTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		100000000000000000000061 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000084 /* amsterdam_demo.bmap in Resources */,
+				100000000000000000000087 /* amsterdam_demo.brte in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		100000000000000000000064 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		100000000000000000000060 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000080 /* App/BikeOSApp.swift in Sources */,
+				100000000000000000000081 /* Services/BikeOSProtocol.swift in Sources */,
+				100000000000000000000082 /* Services/BikeOSBluetooth.swift in Sources */,
+				100000000000000000000086 /* Services/Routing.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		100000000000000000000063 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000085 /* BikeOSTests/BikeOSProtocolTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		100000000000000000000066 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 100000000000000000000020 /* BikeOS */;
+			targetProxy = F44C17FC30AC964D003B144A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		100000000000000000000011 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		100000000000000000000012 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		100000000000000000000090 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				DEVELOPMENT_TEAM = Z5M225BAWF;
+				INFOPLIST_FILE = BikeOS/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bikeos.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		100000000000000000000091 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				DEVELOPMENT_TEAM = Z5M225BAWF;
+				INFOPLIST_FILE = BikeOS/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bikeos.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		100000000000000000000092 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				INFOPLIST_FILE = BikeOS/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bikeos.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/BikeOS.app/BikeOS";
+			};
+			name = Debug;
+		};
+		100000000000000000000093 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				INFOPLIST_FILE = BikeOS/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bikeos.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/BikeOS.app/BikeOS";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		100000000000000000000010 /* Build configuration list for PBXProject "BikeOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				100000000000000000000011 /* Debug */,
+				100000000000000000000012 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		100000000000000000000050 /* Build configuration list for PBXNativeTarget "BikeOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				100000000000000000000090 /* Debug */,
+				100000000000000000000091 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		100000000000000000000051 /* Build configuration list for PBXNativeTarget "BikeOSTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				100000000000000000000092 /* Debug */,
+				100000000000000000000093 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 100000000000000000000001 /* Project object */;
+}

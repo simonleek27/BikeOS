@@ -1,0 +1,3 @@
+// Copy to GraphHopper.xcconfig for a real provider. Do not commit API keys.
+GRAPHHOPPER_API_KEY = replace-me
+GRAPHHOPPER_BASE_URL = https://graphhopper.com/api/1/route
