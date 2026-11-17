@@ -7,6 +7,7 @@ idf_component_register(
         "subsystem_status.cpp"
         "system_diagnostics.cpp"
         "uart_gps_source.cpp"
+        "ble_peripheral.cpp"
         "../../core/src/framebuffer.cpp"
         "../../core/src/geo.cpp"
         "../../core/src/gps.cpp"
@@ -16,8 +17,9 @@ idf_component_register(
         "../../core/src/navigation.cpp"
         "../../core/src/nmea.cpp"
         "../../core/src/route_data.cpp"
-    INCLUDE_DIRS "." "../../core/include"
-    REQUIRES esp_app_format esp_driver_gpio esp_driver_spi esp_driver_uart esp_psram esp_system esp_timer heap spi_flash
+        "../../protocol/src/protocol.cpp"
+    INCLUDE_DIRS "." "../../core/include" "../../protocol/include"
+    REQUIRES bt nvs_flash esp_app_format esp_driver_gpio esp_driver_spi esp_driver_uart esp_psram esp_system esp_timer heap spi_flash
 )
 
 target_add_binary_data(${COMPONENT_LIB}

@@ -15,8 +15,9 @@ add_library(bikeos_core STATIC
     core/src/navigation.cpp
     core/src/nmea.cpp
     core/src/route_data.cpp
+    protocol/src/protocol.cpp
 )
-target_include_directories(bikeos_core PUBLIC core/include)
+target_include_directories(bikeos_core PUBLIC core/include protocol/include)
 target_compile_options(bikeos_core PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
 enable_testing()

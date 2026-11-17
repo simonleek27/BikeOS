@@ -6,6 +6,10 @@ firmware/managed_components/
 firmware/sdkconfig
 firmware/sdkconfig.old
 build-host/
+build-ios/
+build/
+ios/BikeOS.xcodeproj/xcuserdata/
+firmware/sdkconfig.pre_ble
 
 # Local editor and environment files
 .idea/

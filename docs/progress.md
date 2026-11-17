@@ -36,3 +36,9 @@ simulator/firmware-framebuffer verified only.
 Milestone 1—working firmware on the physical ESP32—is complete. Physical LCD
 testing remains blocked on the carrier hardware. The immediate independent
 software task is the display redesign described above.
+## 2026-11-17 — BLE and iPhone milestone
+
+- Added shared version-1 BikeOS BLE framing, CRC32 validation, bundle transfer metadata, acknowledgements, status, and reroute events.
+- Built and flashed the ESP32-S3 BLE peripheral. Serial verification shows NimBLE initialized and `Advertising as BikeOS`.
+- Added a real SwiftUI/CoreBluetooth Xcode project under `ios/` with a simulator-safe Amsterdam route preview, protocol implementation, demo transfer flow, and GraphHopper adapter configuration example.
+- Real iPhone radio validation is still pending: use `docs/ble-ios.md` and report the nRF Connect result before calling that milestone complete.

@@ -17,6 +17,7 @@
 #include "bikeos/map_renderer.hpp"
 #include "bikeos/navigation.hpp"
 #include "bikeos/nmea.hpp"
+#include "bikeos/protocol.hpp"
 
 namespace {
 
@@ -255,6 +256,52 @@ void test_amsterdam_assets()
     CHECK(bikeos::crc32(framebuffer.bytes()) != 0);
 }
 
+void test_ble_protocol()
+{
+    using namespace bikeos::protocol;
+    const std::vector<std::uint8_t> bytes{1, 2, 3, 4, 5};
+    const FrameHeader header{.type = MessageType::transfer_chunk, .transfer_id = 7, .sequence = 2, .flags = 1};
+    const auto encoded = encode_frame(header, encode_transfer_chunk(12, bytes));
+    CHECK(encoded.size() == frame_header_size + sizeof(std::uint32_t) + bytes.size());
+    DecodedFrame decoded;
+    CHECK(decode_frame(encoded, decoded));
+    CHECK(decoded.header.transfer_id == 7);
+    TransferChunk chunk;
+    CHECK(decode_transfer_chunk(decoded.payload, chunk));
+    CHECK(chunk.offset == 12);
+    CHECK(std::equal(chunk.bytes.begin(), chunk.bytes.end(), bytes.begin(), bytes.end()));
+
+    auto corrupt = encoded;
+    corrupt.back() ^= 0x80;
+    CHECK(!decode_frame(corrupt, decoded));
+    auto truncated = encoded;
+    truncated.pop_back();
+    CHECK(!decode_frame(truncated, decoded));
+
+    const TransferBegin begin{.bundle_id = 9,
+                              .route_id = 42,
+                              .map_size = 1024,
+                              .route_size = 256,
+                              .map_crc = 1,
+                              .route_crc = 2,
+                              .bundle_crc = 3};
+    TransferBegin decoded_begin;
+    CHECK(decode_transfer_begin(encode_transfer_begin(begin), decoded_begin));
+    CHECK(decoded_begin.bundle_id == 9 && decoded_begin.route_size == 256);
+    const auto status_payload = encode_status(Status{.navigation_state = NavigationState::navigating,
+                                                     .gps_source = GpsSource::simulated,
+                                                     .flags = 3,
+                                                     .latitude_e7 = 523600000,
+                                                     .longitude_e7 = 48850000,
+                                                     .active_route_id = 42,
+                                                     .route_remaining_m = 123,
+                                                     .next_maneuver_m = 18,
+                                                     .free_heap = 999});
+    Status status;
+    CHECK(decode_status(status_payload, status));
+    CHECK(status.navigation_state == NavigationState::navigating && status.next_maneuver_m == 18);
+}
+
 }  // namespace
 
 int main()
@@ -265,6 +312,7 @@ int main()
     test_map_codec_and_rendering();
     test_simulated_ride();
     test_amsterdam_assets();
+    test_ble_protocol();
     if (failures != 0) {
         std::cerr << failures << " test assertion(s) failed\n";
         return EXIT_FAILURE;
