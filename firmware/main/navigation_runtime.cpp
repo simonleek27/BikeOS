@@ -155,7 +155,7 @@ void NavigationRuntime::step(const std::uint64_t now_ms)
                             navigation,
                             {.center = valid_coordinate(center) ? center : state_->route.points.front(),
                              .meters_per_pixel = 4.0F,
-                             .heading_up = false,
+                             .heading_up = true,
                              .heading_deg = navigation.heading_deg});
 #if CONFIG_BIKEOS_DISPLAY_ST7565
     if (!state_->display->flush(state_->framebuffer)) {

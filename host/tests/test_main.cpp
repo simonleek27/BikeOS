@@ -203,6 +203,27 @@ void test_map_codec_and_rendering()
     CHECK(framebuffer.bytes().size() == 1024);
 }
 
+void test_heading_up_rotation()
+{
+    // Riding east with a road due east: heading-up must draw that road above the rider, not below.
+    const bikeos::GeoPointE7 origin{.latitude_e7 = 523700000, .longitude_e7 = 48900000};
+    const std::vector<bikeos::GeoPointE7> route{origin, offset(origin, 200, 0)};
+    bikeos::NavigationSnapshot nav;
+    nav.gps_valid = true;
+    nav.position = origin;
+    nav.heading_deg = 90.0F;
+    nav.heading_valid = true;
+    bikeos::Framebuffer framebuffer;
+    bikeos::MapRenderer renderer;
+    renderer.render(framebuffer, bikeos::MapDataset{}, route, nav,
+                    {.center = origin, .meters_per_pixel = 4.0F, .heading_up = true, .automatic_zoom = false},
+                    {.show_status = false});
+    const int centre_x = bikeos::Framebuffer::width / 2;
+    CHECK(framebuffer.pixel(centre_x, 14));
+    CHECK(!framebuffer.pixel(centre_x, 48));
+    CHECK(!framebuffer.pixel(centre_x + 30, 31));
+}
+
 void test_simulated_ride()
 {
     auto route = make_route();
@@ -311,6 +332,7 @@ int main()
     test_nmea();
     test_navigation_and_reroute();
     test_map_codec_and_rendering();
+    test_heading_up_rotation();
     test_simulated_ride();
     test_amsterdam_assets();
     test_ble_protocol();

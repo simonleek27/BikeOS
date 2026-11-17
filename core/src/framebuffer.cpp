@@ -151,6 +151,29 @@ void Framebuffer::text_5x7(int x, const int y, const std::string_view text, cons
     }
 }
 
+void Framebuffer::text_5x7_scaled(int x, const int y, const std::string_view text, const int scale,
+                                  const bool on, const int spacing)
+{
+    const int size = std::max(1, scale);
+    for (const char character : text) {
+        const auto glyph = glyph5x7_for(character);
+        for (int column = 0; column < 5; ++column) {
+            for (int row = 0; row < 7; ++row) {
+                if ((glyph[column] & (1U << row)) != 0) {
+                    fill_rect(x + column * size, y + row * size, size, size, on);
+                }
+            }
+        }
+        x += 5 * size + spacing;
+    }
+}
+
+int Framebuffer::text_5x7_scaled_width(const std::string_view text, const int scale, const int spacing)
+{
+    const int size = std::max(1, scale);
+    return text.empty() ? 0 : static_cast<int>(text.size()) * 5 * size + static_cast<int>(text.size() - 1) * spacing;
+}
+
 int Framebuffer::text_5x7_width(const std::string_view text, const int spacing)
 {
     return text.empty() ? 0 : static_cast<int>(text.size()) * 5 + static_cast<int>(text.size() - 1) * spacing;

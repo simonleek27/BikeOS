@@ -64,7 +64,7 @@ void render_frame(bikeos::Framebuffer& framebuffer,
     renderer.render(framebuffer, map, route.points, navigation,
                     {.center = navigation.gps_valid ? navigation.position : route.points.front(),
                      .meters_per_pixel = zoom,
-                     .heading_up = false,
+                     .heading_up = true,
                      .heading_deg = navigation.heading_deg,
                      .automatic_zoom = automatic_zoom},
                     {.show_route = show_route, .show_status = true, .mode = mode});

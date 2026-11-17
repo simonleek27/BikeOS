@@ -22,7 +22,9 @@ public:
     void thick_line(int x0, int y0, int x1, int y1, int thickness, bool on = true);
     void text_3x5(int x, int y, std::string_view text, bool on = true, int spacing = 1);
     void text_5x7(int x, int y, std::string_view text, bool on = true, int spacing = 1);
+    void text_5x7_scaled(int x, int y, std::string_view text, int scale, bool on = true, int spacing = 1);
     static int text_5x7_width(std::string_view text, int spacing = 1);
+    static int text_5x7_scaled_width(std::string_view text, int scale, int spacing = 1);
 
     const std::array<std::uint8_t, byte_count>& bytes() const;
 

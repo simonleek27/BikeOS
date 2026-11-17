@@ -15,6 +15,8 @@ struct Viewport {
     bool heading_up{};
     float heading_deg{};
     bool automatic_zoom{true};
+    int map_left{0};
+    int map_width{Framebuffer::width};
     int map_top{11};
     int map_height{41};
 };
@@ -36,6 +38,9 @@ class MapRenderer {
 public:
     static constexpr int normal_map_top = 11;
     static constexpr int normal_map_height = 41;
+    // Navigating layout: turn panel on the left, map to its right, street strip below the map.
+    static constexpr int panel_width = 40;
+    static constexpr int street_strip_height = 9;
 
     struct ScreenPoint {
         int x{};
@@ -53,17 +58,21 @@ public:
 
 private:
     static ScreenPoint to_screen(GeoPointE7 point, const Viewport& viewport);
-    static bool clip_line(ScreenPoint& a, ScreenPoint& b, int top, int bottom);
+    static bool clip_line(ScreenPoint& a, ScreenPoint& b, int left, int right, int top, int bottom);
     static void draw_position(Framebuffer& framebuffer, ScreenPoint point, float heading_deg,
-                              int top, int bottom);
+                              int left, int right, int top, int bottom);
     static void draw_instruction(Framebuffer& framebuffer, const NavigationSnapshot& navigation,
-                                 const std::span<const GeoPointE7> route, int top, int bottom,
-                                 DisplayMode mode);
+                                 int top, int bottom);
+    static void draw_turn_panel(Framebuffer& framebuffer, const NavigationSnapshot& navigation,
+                                DisplayMode mode, int map_bottom);
     static void draw_status_banner(Framebuffer& framebuffer, const NavigationSnapshot& navigation,
                                    int top, int bottom);
 
     mutable float smoothed_zoom_mpp_{4.0F};
     mutable bool zoom_initialized_{};
+    // GPS course is unreliable when the bike is stopped; keep the map turned to the last good heading.
+    mutable float last_heading_deg_{};
+    mutable bool have_heading_{};
 };
 
 }  // namespace bikeos
