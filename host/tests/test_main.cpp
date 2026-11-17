@@ -51,6 +51,7 @@ bikeos::Route make_route()
         .route_id = 42,
         .version = 1,
         .points = {origin, offset(origin, 0, 100), offset(origin, 100, 100), offset(origin, 100, 200)},
+        .cumulative_distance_m = {},
         .maneuvers = {
             {.point_index = 1, .type = bikeos::ManeuverType::right, .street_name = "TESTSTRAAT"},
             {.point_index = 2, .type = bikeos::ManeuverType::left, .street_name = "FIETSPAD"},
