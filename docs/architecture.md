@@ -78,6 +78,25 @@ Why not stream map data from the phone:
 
 Cost: coverage is limited to the preloaded region. Fine for two riders in Amsterdam. If coverage anywhere is ever needed, the fallback is the phone sending a simplified ~300 m corridor around the route; that is a v2 question.
 
+## Performance and latency (added 2026-11-17)
+
+Rendering and transfer are not the bottleneck. GPS is, and it needs handling in firmware or the map will feel bad.
+
+Fine as designed:
+
+- **Rendering:** a few thousand rotated segments into a 400x240 1-bit buffer takes a few ms on the S3. Draw the map straight into the framebuffer with our own line routine, not as LVGL line objects. LVGL only for the bottom strip.
+- **Display refresh:** a full frame is about 12 KB. The Sharp panel runs SPI at roughly 1 to 2 MHz, so a full redraw is 50 to 100 ms, i.e. 10+ fps. Use DMA so the CPU is not blocked.
+- **Map loading:** cells are tens of KB, read in ms from microSD. Prefetch neighbouring cells when approaching a cell edge. Put the SD card and the display on separate SPI hosts if possible.
+- **Route transfer:** a few KB over BLE, under a second.
+
+Needs handling:
+
+- **1 Hz GPS makes the map step.** At 20 km/h that is ~5.5 m between fixes. Run the NEO-M8N at 5 Hz and interpolate position along the route between fixes so the map moves every frame. 9600 baud NMEA cannot carry 5 Hz: switch the module to UBX NAV-PVT only at 115200.
+- **Heading is noise when slow or stopped.** GPS course over ground is unreliable below ~5 km/h (every red light). Freeze heading below a speed threshold. While on route, use the route bearing at the matched point instead of raw GPS heading, which also smooths turns.
+- **Urban GPS error.** Expect 5 to 15 m of drift on narrow streets. Snap the rider marker to the route while inside the off-route threshold so it does not wander onto the parallel street or canal.
+- **Reroute latency is ~6 to 10 s** (detection window, cellular round trip to the routing API, BLE push). Acceptable because the map keeps showing position meanwhile. Keep the off-route window time-based (~5 s), not fix-count based, so it does not shrink at 5 Hz.
+- **Cold.** Liquid crystal responds more slowly near freezing, which is normal on Amsterdam winter mornings. Measure smearing in the outdoor test rather than assuming.
+
 ## Components and responsibilities
 
 ### iPhone app (SwiftUI, CoreBluetooth)
@@ -91,11 +110,11 @@ Cost: coverage is limited to the preloaded region. Fine for two riders in Amster
 
 ### ESP32-S3 firmware (ESP-IDF, shared C++ 1-bit renderer)
 
-- GPS on UART at 1 Hz, with the same NMEA/filter path tested on the host.
+- GPS on UART: configure the NEO-M8N for UBX NAV-PVT only at 115200 baud, 5 Hz, with the same fix/filter path tested on the host. Interpolate position along the route between fixes; freeze heading below ~5 km/h and use route bearing while on route (see "Performance and latency").
 - Decode a bounded local OSM geometry asset and render it into the exact
   ST7565 1,024-byte page framebuffer.
 - Route following: match each fix to the nearest segment of the route polyline, read distance to the next maneuver from a precomputed cumulative-distance table, render arrow, distance, street name.
-- Off-route detection: more than ~30 m from the line for 5 consecutive fixes, or the matched index moving backwards. Send one reroute request with fix and heading, then at most one every 10 to 15 s until a new route arrives.
+- Off-route detection: more than ~30 m from the line for ~5 s of fixes, or the matched index moving backwards. Send one reroute request with fix and heading, then at most one every 10 to 15 s until a new route arrives.
 - Fallback while waiting: point the arrow at the nearest point on the existing route. In a city this gets the rider back on track most of the time without any help from the phone.
 - If no reroute arrives (phone asleep, app killed, out of range): show a "no phone" state. Never stay silently on a stale route.
 - Map rendering: heading-up map from the stored map file, route on top, maneuver arrow and distance in a bottom strip (see "Map on screen").
@@ -131,7 +150,7 @@ Precompute everything on the phone so the ESP does no geometry beyond nearest-se
 1. ESP bring-up and physical flash. Done.
 2. Shared navigation and map core, 128x64 simulator. Done.
 3. LCD carrier, verified wiring, on-glass display test.
-4. UART GPS bring-up: fixes on screen, time to first fix cold and warm.
+4. UART GPS bring-up: fixes on screen, time to first fix cold and warm, switch to UBX NAV-PVT at 115200 and 5 Hz.
 5. BLE: phone sends a route, ESP acks, ESP follows it. Protocol and firmware advertising done; needs a real iPhone test.
 6. Reroute round trip with the phone locked in a pocket.
-7. Outdoor readability test in sun and at night, then hand off to the mechanical track for the enclosure.
+7. Outdoor readability test in sun, at night, and near freezing (check for smearing), then hand off to the mechanical track for the enclosure.
