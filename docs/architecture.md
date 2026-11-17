@@ -1,17 +1,18 @@
 # BikeOS architecture (v1)
 
 > Status: agreed direction as of 4 November 2026 (ND and Simon). Supersedes section 2 of `brainstorming.md`.
+> Updated 17 November 2026: a map on the screen is now in v1 scope (see "Map on screen").
 > Both bikes are non-electric Swapfiets bikes, so there is no e-bike battery or dynamo to integrate with for v1.
 
 ## The one-line version
 
-The phone computes the route. The ESP has its own GPS and follows the route on its own. If the rider goes off route, the ESP asks the phone for a new one.
+The phone computes the route. The ESP has its own GPS and follows the route on its own. If the rider goes off route, the ESP asks the phone for a new one. The ESP draws a heading-up map around the rider from a city map stored on the device, with the route on top, car-nav style.
 
 ## Scope for v1
 
-In: ESP32-S3, memory LCD, GPS module, front light, BLE link, iPhone app, route following and rerouting.
+In: ESP32-S3, memory LCD, GPS module, front light, BLE link, iPhone app, route following and rerouting, heading-up map on screen from a preloaded Amsterdam map.
 
-Out, deliberately: turn signals (buttons get fitted but not wired), handlebar mount and enclosure (mechanical track, separate), speed display, offline routing, dynamo charging, maps on screen.
+Out, deliberately: turn signals (buttons get fitted but not wired), handlebar mount and enclosure (mechanical track, separate), speed display, offline routing, dynamo charging, map coverage outside the preloaded region.
 
 ## Why not "phone is the navigation brain"
 
@@ -37,6 +38,26 @@ Moving GPS to the ESP removes both. The phone's only background job is answering
 
 Power budget: ESP32-S3 on BLE 30 to 40 mA, GPS 25 mA, display under 1 mA, front light a few mA when on. The 4.3" colour TFT and the USB power bank from the original plan are dropped.
 
+## Map on screen (added 2026-11-17)
+
+Turn arrows alone are not enough: Amsterdam street names are hard to read from the bike, so the rider needs to see the shape of the streets around them. The screen shows a heading-up map like a car nav, with the route drawn thick on top and the maneuver strip along the bottom.
+
+**Decision: the map lives on the device; the phone still only sends the route.**
+
+- **Source:** OpenStreetMap, Geofabrik Noord-Holland extract.
+- **Build step (laptop, `tools/mapbuild/`):** osmium plus Python filters to what the rider needs to see: cycleways and cycle tracks, residential and service streets, main roads, canals and water outlines. Drop buildings, POIs and footpaths. Each way keeps a class (cycleway, minor road, major road, water) so the ESP can draw them differently.
+- **Format:** custom binary, a grid of roughly 500 m cells with an index header. Coordinates are int16 offsets relative to the cell origin, delta-encoded. Expected size for Amsterdam is a few MB; measure once the build script exists.
+- **Storage:** microSD, or flash if it fits beside the firmware.
+- **Rendering:** load the 4 to 9 cells around the fix into PSRAM, rotate to heading, draw thick lines per class, draw the route on top, then the rider marker. 400x240 1-bit at several fps is well within the S3's budget.
+- **Updates:** the ESP pulls a new map file over WiFi at home, roughly monthly. Street layout changes slowly.
+
+Why not stream map data from the phone:
+
+1. BLE throughput on iOS is tens of KB/s in practice. Sending map data for every route and every reroute is slow and costs phone battery, which this architecture exists to avoid.
+2. The map must keep working off route, which is exactly when the rider needs it. A corridor streamed around the old route goes blank once the rider leaves it.
+
+Cost: coverage is limited to the preloaded region. Fine for two riders in Amsterdam. If coverage anywhere is ever needed, the fallback is the phone sending a simplified ~300 m corridor around the route; that is a v2 question.
+
 ## Components and responsibilities
 
 ### iPhone app (SwiftUI, CoreBluetooth)
@@ -55,6 +76,8 @@ Power budget: ESP32-S3 on BLE 30 to 40 mA, GPS 25 mA, display under 1 mA, front 
 - Off-route detection: more than ~30 m from the line for 5 consecutive fixes, or the matched index moving backwards. Send one reroute request with fix and heading, then at most one every 10 to 15 s until a new route arrives.
 - Fallback while waiting: point the arrow at the nearest point on the existing route. In a city this gets the rider back on track most of the time without any help from the phone.
 - If no reroute arrives (phone asleep, app killed, out of range): show a "no phone" state. Never stay silently on a stale route.
+- Map rendering: heading-up map from the stored map file, route on top, maneuver arrow and distance in a bottom strip (see "Map on screen").
+- Map update over WiFi when on a known network.
 - Front light on a GPIO, toggled by a button or a light sensor later.
 - Persist last fix to flash on power-down so the start screen can show "near last position" before the GPS locks.
 
@@ -79,12 +102,14 @@ Precompute everything on the phone so the ESP does no geometry beyond nearest-se
 2. **Waterproofing** is a mechanical problem: fully sealed enclosure, sealed buttons, sealed charge port. Owned by the enclosure work, not v1 firmware.
 3. **Turn signals**: a handlebar blinker faces forward; needs a rear unit to be useful. Parked.
 4. **Budget**: display plus GPS is roughly €90, offset by dropping the 4.3B (€37.50) and the power bank (€12).
+5. **Map storage**: microSD slot or onboard flash. Depends on the measured map size.
 
 ## Build sequence
 
 1. ESP + memory LCD bring-up: hello screen, buttons, front light.
 2. GPS bring-up: fixes on screen, time to first fix cold and warm.
 3. Route following on a hard-coded route loaded over serial.
-4. BLE: phone sends a route, ESP acks, ESP follows it.
-5. Reroute round trip with the phone locked in a pocket.
-6. Outdoor readability test in sun and at night, then hand off to the mechanical track for the enclosure.
+4. Map: build script produces the Amsterdam map file; ESP renders a heading-up map with the hard-coded route on top.
+5. BLE: phone sends a route, ESP acks, ESP follows it.
+6. Reroute round trip with the phone locked in a pocket.
+7. Outdoor readability test in sun and at night, then hand off to the mechanical track for the enclosure.
