@@ -2,14 +2,15 @@
 
 ## Read this first
 
-The navigation stack and redesigned 128×64 interface work in the shared
-host/ESP framebuffer. Display readability was the first task; BLE and the
-iPhone app remain intentionally behind it.
+The navigation stack, redesigned 128×64 interface, physical ESP32 runtime, and
+the first physical iPhone↔ESP32 BLE path are integrated. The current branch
+finishes the route-model/UI and ACK-driven transfer work; the remaining checks
+are physical transfer capture, LCD wiring, and GPS hardware.
 
 Repository state at handoff:
 
-- Branch: `codex/navigation-map`
-- Working tree: clean after the redesign commit
+- Branch: `codex/end-to-end-integration`
+- Working tree: integration changes pending commit
 - ESP firmware: BikeOS 0.2.0
 - Toolchain: ESP-IDF 5.5.6
 - Host build: CMake + C++20 + SDL2 + zlib
@@ -46,8 +47,12 @@ Recent logical commits:
 
 - The LCD has not been electrically connected or observed displaying pixels.
 - UART GPS is implemented but has not been tested with a physical receiver.
-- BLE route/map transfer is not implemented.
-- The iPhone app is not implemented.
+- BLE route/map transfer is implemented with begin/chunk/commit ACK pacing and
+  route-ID activation verification; repeat on the physical setup for captured
+  serial evidence.
+- The iPhone app is implemented for the bundled route: BRTE decode, full map,
+  maneuver list, live status marker, and transfer progress. GraphHopper parsing
+  is present but requires a local API key.
 - No outdoor road test has happened.
 
 Do not describe the LCD as physically integrated; its panel is still unwired.

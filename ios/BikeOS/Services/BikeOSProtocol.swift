@@ -51,11 +51,25 @@ struct BikeOSStatus {
     let remainingM: UInt32
     let nextManeuverM: UInt32
     let freeHeap: UInt32
+    let headingDeg: Double?
+    let speedMPS: Double?
+    let matchedPointIndex: UInt16?
 
     static func decode(_ frame: BikeOSFrame) -> BikeOSStatus? {
-        guard frame.type == .status || frame.type == .rerouteRequest, frame.payload.count == 28, frame.payload[0] == 1,
+        guard frame.type == .status || frame.type == .rerouteRequest, (frame.payload.count == 28 || frame.payload.count == 36), frame.payload[0] == 1,
               let state = BikeOSNavigationState(rawValue: frame.payload[1]), let gps = BikeOSGpsSource(rawValue: frame.payload[2]) else { return nil }
-        return BikeOSStatus(state: state, gps: gps, flags: frame.payload[3], latitudeE7: Int32(bitPattern: frame.payload.leUInt32(at: 4)), longitudeE7: Int32(bitPattern: frame.payload.leUInt32(at: 8)), routeID: frame.payload.leUInt32(at: 12), remainingM: frame.payload.leUInt32(at: 16), nextManeuverM: frame.payload.leUInt32(at: 20), freeHeap: frame.payload.leUInt32(at: 24))
+        let extended = frame.payload.count == 36
+        return BikeOSStatus(state: state, gps: gps, flags: frame.payload[3], latitudeE7: Int32(bitPattern: frame.payload.leUInt32(at: 4)), longitudeE7: Int32(bitPattern: frame.payload.leUInt32(at: 8)), routeID: frame.payload.leUInt32(at: 12), remainingM: frame.payload.leUInt32(at: 16), nextManeuverM: frame.payload.leUInt32(at: 20), freeHeap: frame.payload.leUInt32(at: 24), headingDeg: extended ? Double(frame.payload.leUInt16(at: 28)) / 100.0 : nil, speedMPS: extended ? Double(frame.payload.leUInt16(at: 30)) / 100.0 : nil, matchedPointIndex: extended ? frame.payload.leUInt16(at: 32) : nil)
+    }
+}
+
+struct BikeOSAcknowledgement {
+    let result: BikeOSResultCode
+    let nextOffset: UInt32
+    let bundleID: UInt32
+    static func decode(_ frame: BikeOSFrame) -> BikeOSAcknowledgement? {
+        guard frame.type == .acknowledgement, frame.payload.count == 9, let result = BikeOSResultCode(rawValue: frame.payload[0]) else { return nil }
+        return BikeOSAcknowledgement(result: result, nextOffset: frame.payload.leUInt32(at: 1), bundleID: frame.payload.leUInt32(at: 5))
     }
 }
 

@@ -80,7 +80,10 @@ bool NavigationRuntime::initialize()
     }
 #if CONFIG_BIKEOS_GPS_SIM
     if (!state->simulator.set_route(state->route)) return false;
-    state->simulator.set_speed_mps(18.0F);
+    // Keep the demo physically believable: 16.2 km/h is a normal bicycle pace.
+    // The previous 18 m/s value made the moving-marker demo traverse the route
+    // at motorway speed and made the LCD/phone telemetry hard to inspect.
+    state->simulator.set_speed_mps(4.5F);
     state->simulator.set_events({
         {state->route.total_distance_m * 0.42F, state->route.total_distance_m * 0.50F,
          SimulationEventType::off_route, 50.0F},
@@ -217,6 +220,13 @@ protocol::Status NavigationRuntime::status() const
     result.route_remaining_m = static_cast<std::uint32_t>(std::max(0.0F, navigation.route_remaining_m));
     result.next_maneuver_m = static_cast<std::uint32_t>(std::max(0.0F, navigation.distance_to_maneuver_m));
     result.free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+    if (navigation.heading_valid) {
+        result.heading_deg_cdeg = static_cast<std::uint16_t>(std::clamp(navigation.heading_deg, 0.0F, 359.99F) * 100.0F);
+    }
+#if CONFIG_BIKEOS_GPS_SIM
+    result.speed_cms = 450;
+#endif
+    result.matched_point_index = static_cast<std::uint16_t>(std::min<std::size_t>(navigation.matched_segment, 65535));
     return result;
 }
 

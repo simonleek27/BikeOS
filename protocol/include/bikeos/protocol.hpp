@@ -114,6 +114,12 @@ struct Status {
     std::uint32_t route_remaining_m{};
     std::uint32_t next_maneuver_m{};
     std::uint32_t free_heap{};
+    // Optional v1 extension (bytes 28-35). Older readers may consume the
+    // original 28-byte prefix; zero means that a value is unavailable.
+    std::uint16_t heading_deg_cdeg{};
+    std::uint16_t speed_cms{};
+    std::uint16_t matched_point_index{};
+    std::uint16_t reserved{};
 };
 
 std::uint32_t crc32(std::span<const std::uint8_t> data);

@@ -15,22 +15,23 @@ Updated: 18 November 2026
 | LCD identification | Complete | ERC12864SBSF-14, ST7565R, 128 × 64, 30-pin 0.5 mm FPC |
 | LCD SPI driver | Implemented, not physically tested | Needs bottom-contact carrier and charge-pump capacitor network |
 | LCD wiring | Blocked on physical carrier | Provide adapter/carrier and clear ESP board photos; then assign GPIOs |
-| BLE route transfer | Demo path implemented; physical link verified | ESP32 advertises the corrected service UUID; physical iPhone connected and received status notifications; repeat the demo transfer with serial capture to verify the final commit ACK |
-| iPhone app | Working physical demo | SwiftUI map preview, CoreBluetooth discovery, status notifications, and demo route transfer install/run on a physical iPhone; production UX and ACK-driven retry/windowing remain |
+| BLE route transfer | ACK-driven implementation | iPhone now waits for begin/chunk/commit ACKs, sends one bounded chunk at a time, validates transfer/bundle IDs, and verifies the activated route ID from status; physical repeat is the next verification |
+| iPhone app | Physical-demo ready | SwiftUI now decodes the bundled BRTE route (points + street maneuvers), renders the full route, shows live ESP32 position/status, and exposes transfer progress; GraphHopper response parsing is implemented but needs an API key |
 
 ## Current assessment
 
 The data pipeline, navigation behavior, shared framebuffer, simulator, physical
 ESP execution, and the first real iPhone↔ESP32 BLE connection are working. The
-redesigned screen now gives the maneuver and distance a fixed hierarchy while
-preserving real geographic geometry. The LCD is still not physically wired, so
-pixel output remains simulator/firmware-framebuffer verified only. GPS is still
-the deterministic scripted source; no physical GPS module is connected.
+iPhone and ESP32 now share the same validated BRTE route metadata, and transfer
+progress is driven by acknowledgements rather than a blind write burst. The
+LCD is still not physically wired, so pixel output remains simulator/
+firmware-framebuffer verified only. GPS is still the deterministic scripted
+source; no physical GPS module is connected.
 
 ## Next priorities
 
-1. Capture and validate a complete demo-route transfer ACK on the ESP32, then
-   add ACK-driven retry/windowing instead of the current simple demo stream.
+1. Repeat the demo-route transfer on the physical board and capture the final
+   commit ACK plus activated route status in the serial log.
 2. Build the safe LCD FPC carrier circuit, verify the module, assign GPIOs, and
    run the physical all-pixels/text/map sequence.
 3. Connect and verify a physical GPS module, then replace deterministic GPS

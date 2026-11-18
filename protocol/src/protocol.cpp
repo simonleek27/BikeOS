@@ -159,7 +159,7 @@ bool decode_acknowledgement(const std::span<const std::uint8_t> payload, Acknowl
 std::vector<std::uint8_t> encode_status(const Status& status)
 {
     std::vector<std::uint8_t> output;
-    output.reserve(32);
+    output.reserve(36);
     append_le(output, status.protocol_version);
     append_le(output, static_cast<std::uint8_t>(status.navigation_state));
     append_le(output, static_cast<std::uint8_t>(status.gps_source));
@@ -170,12 +170,16 @@ std::vector<std::uint8_t> encode_status(const Status& status)
     append_le(output, status.route_remaining_m);
     append_le(output, status.next_maneuver_m);
     append_le(output, status.free_heap);
+    append_le(output, status.heading_deg_cdeg);
+    append_le(output, status.speed_cms);
+    append_le(output, status.matched_point_index);
+    append_le(output, status.reserved);
     return output;
 }
 
 bool decode_status(const std::span<const std::uint8_t> payload, Status& output)
 {
-    if (payload.size() != 28 || payload[0] != version || payload[1] > static_cast<std::uint8_t>(NavigationState::error) ||
+    if ((payload.size() != 28 && payload.size() != 36) || payload[0] != version || payload[1] > static_cast<std::uint8_t>(NavigationState::error) ||
         payload[2] > static_cast<std::uint8_t>(GpsSource::iphone_fallback)) {
         return false;
     }
@@ -187,6 +191,12 @@ bool decode_status(const std::span<const std::uint8_t> payload, Status& output)
         !read_le(payload, offset, output.latitude_e7) || !read_le(payload, offset, output.longitude_e7) ||
         !read_le(payload, offset, output.active_route_id) || !read_le(payload, offset, output.route_remaining_m) ||
         !read_le(payload, offset, output.next_maneuver_m) || !read_le(payload, offset, output.free_heap)) {
+        return false;
+    }
+    if (payload.size() == 36 && (!read_le(payload, offset, output.heading_deg_cdeg) ||
+                                 !read_le(payload, offset, output.speed_cms) ||
+                                 !read_le(payload, offset, output.matched_point_index) ||
+                                 !read_le(payload, offset, output.reserved))) {
         return false;
     }
     output.navigation_state = static_cast<NavigationState>(navigation_state);
