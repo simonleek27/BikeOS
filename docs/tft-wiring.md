@@ -176,12 +176,10 @@ With **both USB power and any external supply disconnected**:
 9. A lit backlight, white screen, or black screen is **not** proof of SPI
    communication; the display driver is not installed yet.
 
-## 8. Future GPS reservation
+## 8. GPS pins
 
-No GPS GPIOs are approved yet. The firmware Kconfig exposes UART number, RX,
-and TX as `-1 until verified`; keep them unassigned until the ESP carrier photo
-and the GPS module header are available. The TFT plan must not consume the
-future UART pins.
+The NEO-6M GPS uses UART1 on GPIO18 (ESP RX) and GPIO17 (ESP TX), powered
+from `3V3`. See `docs/gps.md`. These do not overlap the TFT pins.
 
 ## 9. Firmware handoff for the next milestone
 
