@@ -113,7 +113,8 @@ import Foundation
         // and the protocol's 480-byte payload limit. With-response writes give
         // transport-level flow control; the ESP32 ACK gives offset-level flow
         // control and validation.
-        let maxFrame = min(500, peripheral.maximumWriteValueLength(for: .withResponse))
+        let maxFrame = min(500, max(peripheral.maximumWriteValueLength(for: .withResponse),
+                                  peripheral.maximumWriteValueLength(for: .withoutResponse)))
         let capacity = min(476, maxFrame - BikeOSFrame.headerSize - MemoryLayout<UInt32>.size)
         guard capacity > 0 else {
             phase = .failed
@@ -134,7 +135,7 @@ import Foundation
             lastAck = "Could not encode route chunk"
             return
         }
-        peripheral.writeValue(frame, for: data, type: .withResponse)
+        guard write(frame, to: data, on: peripheral) else { return }
         lastAck = "Sending Amsterdam route (\(Int(Double(end) / Double(transferBytes.count) * 100))%)"
         armTransferTimeout()
     }
@@ -166,8 +167,30 @@ import Foundation
             return 0
         }
         if trackAck, let label { pendingCommands[frameSequence] = label }
-        peripheral.writeValue(frame, for: control, type: .withResponse)
+        guard write(frame, to: control, on: peripheral) else { return 0 }
         return frameSequence
+    }
+
+    /// CoreBluetooth can expose a smaller write-with-response size than the
+    /// negotiated ATT MTU. The ESP32 control characteristic accepts both write
+    /// modes, so use the response path when it fits and fall back to a
+    /// no-response write for larger protocol frames. Application-level ACKs
+    /// still gate every transfer step.
+    private func write(_ frame: Data, to characteristic: CBCharacteristic, on peripheral: CBPeripheral) -> Bool {
+        let responseLimit = peripheral.maximumWriteValueLength(for: .withResponse)
+        if frame.count <= responseLimit, characteristic.properties.contains(.write) {
+            peripheral.writeValue(frame, for: characteristic, type: .withResponse)
+            return true
+        }
+        let noResponseLimit = peripheral.maximumWriteValueLength(for: .withoutResponse)
+        if frame.count <= noResponseLimit, characteristic.properties.contains(.writeWithoutResponse) {
+            peripheral.writeValue(frame, for: characteristic, type: .withoutResponse)
+            return true
+        }
+        lastAck = "BLE write limit is \(responseLimit) bytes; disconnect/reconnect and try again"
+        phase = .failed
+        clearTransferTimeout()
+        return false
     }
 
     private func armTransferTimeout() {

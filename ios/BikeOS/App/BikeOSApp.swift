@@ -150,6 +150,25 @@ private struct ActiveNavigationView: View {
         bluetooth.status?.nextManeuverM ?? UInt32(currentManeuver?.distanceM ?? 0)
     }
 
+    private var navigationState: BikeOSNavigationState {
+        bluetooth.status?.state ?? .waitingForGPS
+    }
+
+    private var primaryTitle: String {
+        switch navigationState {
+        case .navigating, .rerouting, .offRoute: "Pause"
+        case .gpsLost: "Resume"
+        default: "Start ride"
+        }
+    }
+
+    private var primarySymbol: String {
+        switch navigationState {
+        case .navigating, .rerouting, .offRoute: "pause.fill"
+        default: "play.fill"
+        }
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             Map(position: $cameraPosition, interactionModes: [.pan, .zoom, .rotate]) {
@@ -176,83 +195,114 @@ private struct ActiveNavigationView: View {
             .onChange(of: bluetooth.liveCoordinate?.latitude) { _, _ in followRiderIfNeeded() }
             .onChange(of: bluetooth.liveHeading) { _, _ in followRiderIfNeeded() }
 
-            VStack(spacing: 10) {
-                HStack {
-                    Label("SIMULATED GPS", systemImage: "location.fill")
-                        .font(.caption.bold())
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(.orange)
-                        .foregroundStyle(.white)
-                        .clipShape(Capsule())
-                    Spacer()
-                    Text(bluetooth.connection)
-                        .font(.caption.bold())
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(.thinMaterial)
-                        .clipShape(Capsule())
-                }
-                .padding(.horizontal)
-
-                HStack(spacing: 8) {
-                    Button("Recenter") { recenter() }.buttonStyle(.borderedProminent)
-                    Button("Route fit") { fitRoute() }.buttonStyle(.bordered)
-                    Toggle("Heading", isOn: $headingUp)
-                        .toggleStyle(.button)
-                        .onChange(of: headingUp) { _, _ in recenter() }
-                }
-                .padding(.horizontal)
-            }
-
-            VStack {
+            VStack(spacing: 0) {
+                topStatusBar
                 Spacer()
                 informationCard
             }
         }
-        .navigationTitle("Navigation")
+        .navigationTitle(route.name)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { fitRoute() }
     }
 
+    private var topStatusBar: some View {
+        HStack(spacing: 8) {
+            Label("SIMULATED GPS", systemImage: "location.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(.orange, in: Capsule())
+            Label(bluetooth.status?.state.label ?? "Ready", systemImage: "bicycle")
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(.regularMaterial, in: Capsule())
+            Spacer()
+            Button { recenter() } label: {
+                Image(systemName: "location.fill")
+                    .frame(width: 34, height: 34)
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityLabel("Recenter on rider")
+        }
+        .padding(.horizontal)
+        .padding(.top, 8)
+    }
+
     private var informationCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Image(systemName: currentManeuver?.type.symbolName ?? "arrow.up")
-                    .font(.title)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.blue)
                 VStack(alignment: .leading) {
-                    Text(currentManeuver?.type.label ?? "Follow the route").font(.headline)
-                    Text(currentManeuver?.streetName.isEmpty == false ? currentManeuver!.streetName : "Live ESP32 telemetry")
+                    Text(currentManeuver?.type.label ?? "Follow the route")
+                        .font(.headline)
+                    Text(currentManeuver?.streetName.isEmpty == false ? currentManeuver!.streetName : "ESP32 telemetry")
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
                 VStack(alignment: .trailing) {
                     Text("\(maneuverDistance) m").font(.title3.bold())
-                    Text("next turn").font(.caption).foregroundStyle(.secondary)
+                    Text("to turn").font(.caption).foregroundStyle(.secondary)
                 }
             }
-            Divider()
-            HStack {
-                Label(bluetooth.status?.state.label ?? "Ready", systemImage: "dot.radiowaves.left.and.right")
+            HStack(spacing: 18) {
+                metric("Remaining", value: "\(bluetooth.status?.remainingM ?? UInt32(route.distanceM)) m")
+                metric("Connection", value: bluetooth.connection)
                 Spacer()
-                Text("\(bluetooth.status?.remainingM ?? UInt32(route.distanceM)) m left")
             }
-            HStack {
-                Button("Send route") { bluetooth.sendDemoRoute() }.buttonStyle(.bordered)
-                Button("Start") { bluetooth.startNavigation() }.buttonStyle(.borderedProminent)
-                Button("Pause") { bluetooth.pauseNavigation() }.buttonStyle(.bordered)
-                Button("Resume") { bluetooth.resumeNavigation() }.buttonStyle(.bordered)
-            }
-            HStack {
-                Button("Restart") { bluetooth.restartNavigation() }.buttonStyle(.bordered)
-                Button("Test off-route") { bluetooth.triggerOffRoute() }.buttonStyle(.bordered)
-                Spacer()
-                Button("End ride") { bluetooth.stopNavigation(); dismiss() }.buttonStyle(.bordered)
+            HStack(spacing: 10) {
+                Button {
+                    if navigationState == .navigating || navigationState == .rerouting || navigationState == .offRoute {
+                        bluetooth.pauseNavigation()
+                    } else if navigationState == .gpsLost {
+                        bluetooth.resumeNavigation()
+                    } else {
+                        bluetooth.startNavigation()
+                    }
+                } label: {
+                    Label(primaryTitle, systemImage: primarySymbol)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Menu {
+                    Button("Send route", systemImage: "arrow.up.circle") { bluetooth.sendDemoRoute() }
+                    Button("Restart from beginning", systemImage: "backward.end") { bluetooth.restartNavigation() }
+                    Button("Test off-route", systemImage: "exclamationmark.triangle") { bluetooth.triggerOffRoute() }
+                    Divider()
+                    Button("Route overview", systemImage: "map") { fitRoute() }
+                    Button("Heading-up map", systemImage: "location.north") {
+                        headingUp.toggle()
+                        recenter()
+                    }
+                    Divider()
+                    Button("End ride", systemImage: "stop.fill", role: .destructive) {
+                        bluetooth.stopNavigation()
+                        dismiss()
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .frame(width: 46, height: 44)
+                }
+                .buttonStyle(.bordered)
             }
             Text(bluetooth.lastAck).font(.caption).foregroundStyle(.secondary)
         }
-        .padding()
+        .padding(.horizontal, 18)
+        .padding(.top, 16)
+        .padding(.bottom, 12)
         .background(.regularMaterial)
+    }
+
+    private func metric(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+            Text(value).font(.subheadline.weight(.semibold)).lineLimit(1)
+        }
     }
 
     private func recenter() {

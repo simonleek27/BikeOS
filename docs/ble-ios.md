@@ -11,7 +11,7 @@ The ESP32-S3 firmware advertises as `BikeOS` on a changing `/dev/cu.usbmodem*` p
 5. Read Device Info; it should contain `protocol=1`.
 6. Write a status-request frame to Control (`42 4B 01 01` plus the 16-byte zero header fields and CRC payload for an empty payload). Confirm an acknowledgement notification.
 
-The real iPhone connection has been verified once: the app discovered `BikeOS`, connected, and the ESP32 log recorded a BLE connection and status notifications. The current app performs the full ACK-paced bundle transfer, verifies the activated route ID, and exposes explicit navigation controls. Repeat the route transfer with the board serial monitor open to capture the final commit ACK and activated route status.
+The real iPhone connection has been verified once: the app discovered `BikeOS`, connected, and the ESP32 log recorded a BLE connection and status notifications. The current app performs the full ACK-paced bundle transfer, verifies the activated route ID, and exposes explicit navigation controls. The control characteristic accepts both BLE write modes so larger metadata frames can use the negotiated ATT MTU without triggering CoreBluetooth's invalid-length error. Repeat the route transfer with the board serial monitor open to capture the final commit ACK and activated route status.
 
 ## App
 

@@ -14,6 +14,7 @@
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
+#include "host/ble_att.h"
 #include "host/ble_uuid.h"
 #include "os/os_mbuf.h"
 #include "services/gap/ble_svc_gap.h"
@@ -244,7 +245,9 @@ const ble_gatt_chr_def characteristics[] = {
      .access_cb = access_status,
      .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY,
      .val_handle = &g_status_handle},
-    {.uuid = control_uuid, .access_cb = access_control, .flags = BLE_GATT_CHR_F_WRITE},
+    {.uuid = control_uuid,
+     .access_cb = access_control,
+     .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP},
     {.uuid = data_uuid,
      .access_cb = access_data,
      .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP},
@@ -349,6 +352,11 @@ bool BlePeripheral::initialize(StatusProvider status_provider,
         nvs_result = nvs_flash_init();
     }
     if (nvs_result != ESP_OK || nimble_port_init() != ESP_OK) return false;
+    // The transfer-begin frame carries the route metadata in one write. Keep
+    // the ATT MTU large enough for that frame and for the negotiated iPhone
+    // data chunks; CoreBluetooth will still cap each write to the link's
+    // negotiated maximum.
+    if (ble_att_set_preferred_mtu(256) != 0) return false;
     ble_hs_cfg.sync_cb = on_sync;
     if (ble_svc_gap_device_name_set(kDeviceName) != 0 || ble_gatts_count_cfg(services) != 0 ||
         ble_gatts_add_svcs(services) != 0) {
