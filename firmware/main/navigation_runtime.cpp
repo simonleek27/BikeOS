@@ -12,8 +12,11 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "sdkconfig.h"
 
+#include "bikeos/canvas.hpp"
+#include "bikeos/color_renderer.hpp"
 #include "bikeos/framebuffer.hpp"
 #include "bikeos/gps.hpp"
 #include "bikeos/gps_simulator.hpp"
@@ -34,6 +37,12 @@ namespace bikeos {
 namespace {
 
 constexpr char kTag[] = "navigation";
+constexpr std::uint32_t kSimulatorArrivedHoldSteps = 6;  // ~6 s of "Arrived" before the demo restarts
+
+std::uint64_t uptime_ms()
+{
+    return static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
+}
 
 std::span<const std::uint8_t> embedded_asset(const std::uint8_t* begin, const std::uint8_t* end)
 {
@@ -59,8 +68,21 @@ struct NavigationRuntime::State {
 #endif
 #if CONFIG_BIKEOS_DISPLAY_ILI9341
     std::unique_ptr<Ili9341Display> ili9341_display;
+    std::unique_ptr<Canvas565> canvas;  // 150 KiB, lands in PSRAM
+    ColorMapRenderer color_renderer;
+    NavigationSnapshot latest;
+    bool have_latest{};
+    std::uint32_t last_frame_crc{};
+    std::uint32_t frames{};
+    std::uint64_t frame_window_start_ms{};
+    std::int64_t frame_window_render_us{};
+    std::int64_t frame_window_flush_us{};
 #endif
+    // Last GPS wall-clock time and the monotonic time it arrived, for the clock chip.
+    std::int64_t utc_epoch_ms{};
+    std::uint64_t utc_epoch_received_ms{};
     std::uint32_t step_count{};
+    std::uint32_t arrived_steps{};
     bool phone_connected{};
     bool reroute_pending{};
 };
@@ -133,6 +155,7 @@ bool NavigationRuntime::initialize()
 #if CONFIG_BIKEOS_DISPLAY_TEST_PATTERN
     if (!state->ili9341_display->show_test_pattern()) return false;
 #endif
+    state->canvas = std::make_unique<Canvas565>();
 #endif
     ESP_LOGI(kTag,
              "OSM map ready: %u roads %u points %u bytes; route=%" PRIu32 " %.0fm %u points",
@@ -169,6 +192,20 @@ void NavigationRuntime::step(const std::uint64_t now_ms)
     std::scoped_lock lock(state_->mutex);
     std::optional<GpsFix> candidate;
 #if CONFIG_BIKEOS_GPS_SIM
+    // Demo loop: hold "Arrived" on screen for a few seconds, then ride the
+    // same route again from the start.
+    if (state_->simulator.finished() &&
+        state_->navigation.snapshot().state == NavigationState::destination_reached) {
+        if (++state_->arrived_steps >= kSimulatorArrivedHoldSteps) {
+            state_->arrived_steps = 0;
+            state_->simulator.reset();
+            state_->filter.reset();  // the restart is a jump the filter would reject
+            state_->navigation.set_route(state_->route);
+            ESP_LOGI(kTag, "Simulated ride finished; restarting route %" PRIu32, state_->route.route_id);
+        }
+    } else {
+        state_->arrived_steps = 0;
+    }
     candidate = state_->simulator.step(now_ms);
 #elif CONFIG_BIKEOS_GPS_UART
     candidate = state_->uart_gps->poll(now_ms);
@@ -176,6 +213,16 @@ void NavigationRuntime::step(const std::uint64_t now_ms)
     std::optional<GpsFix> accepted;
     if (candidate) accepted = state_->filter.accept(*candidate);
     const auto navigation = state_->navigation.update(accepted, state_->phone_connected, now_ms);
+    if (accepted && accepted->utc_epoch_ms != 0) {
+        state_->utc_epoch_ms = accepted->utc_epoch_ms;
+        state_->utc_epoch_received_ms = uptime_ms();
+    }
+#if CONFIG_BIKEOS_DISPLAY_ILI9341 && !CONFIG_BIKEOS_DISPLAY_TEST_PATTERN
+    // The color TFT is drawn by render_frame(); keep the latest snapshot for it.
+    state_->latest = navigation;
+    state_->have_latest = true;
+    const auto frame_crc = state_->last_frame_crc;
+#else
     const GeoPointE7 center = navigation.gps_valid ? navigation.position : navigation.matched_position;
     state_->renderer.render(state_->framebuffer,
                             state_->map,
@@ -189,12 +236,9 @@ void NavigationRuntime::step(const std::uint64_t now_ms)
     if (!state_->display->flush(state_->framebuffer)) {
         ESP_LOGE(kTag, "LCD framebuffer transfer failed");
     }
-#elif CONFIG_BIKEOS_DISPLAY_ILI9341 && !CONFIG_BIKEOS_DISPLAY_TEST_PATTERN
-    if (!state_->ili9341_display->flush(state_->framebuffer)) {
-        ESP_LOGE(kTag, "ILI9341 framebuffer transfer failed");
-    }
 #endif
     const auto frame_crc = crc32(state_->framebuffer.bytes());
+#endif
     ++state_->step_count;
     if (accepted) {
         ESP_LOGI(kTag,
@@ -215,6 +259,48 @@ void NavigationRuntime::step(const std::uint64_t now_ms)
         ESP_LOGW(kTag, "Reroute request route=%" PRIu32 " heading=%.1f timestamp=%" PRIu64,
                  navigation.route_id, navigation.heading_deg, now_ms);
     }
+}
+
+void NavigationRuntime::render_frame(const std::uint64_t frame_ms)
+{
+#if CONFIG_BIKEOS_DISPLAY_ILI9341 && !CONFIG_BIKEOS_DISPLAY_TEST_PATTERN
+    if (!state_) return;
+    std::scoped_lock lock(state_->mutex);
+    if (!state_->have_latest) return;
+    const std::uint64_t now_ms = uptime_ms();
+    const std::int64_t utc_now = state_->utc_epoch_ms == 0
+                                     ? 0
+                                     : state_->utc_epoch_ms +
+                                           static_cast<std::int64_t>(now_ms - state_->utc_epoch_received_ms);
+    const std::int64_t render_start_us = esp_timer_get_time();
+    state_->color_renderer.render(*state_->canvas, state_->map, state_->route.points, state_->latest,
+                                  {.utc_epoch_ms = utc_now, .now_ms = frame_ms});
+    const std::int64_t flush_start_us = esp_timer_get_time();
+    if (!state_->ili9341_display->flush(*state_->canvas)) {
+        ESP_LOGE(kTag, "ILI9341 color frame transfer failed");
+    }
+    const std::int64_t flush_end_us = esp_timer_get_time();
+    const auto pixels = state_->canvas->pixels();
+    state_->last_frame_crc = crc32({reinterpret_cast<const std::uint8_t*>(pixels.data()), pixels.size_bytes()});
+
+    state_->frame_window_render_us += flush_start_us - render_start_us;
+    state_->frame_window_flush_us += flush_end_us - flush_start_us;
+    if (state_->frames++ == 0) state_->frame_window_start_ms = frame_ms;
+    const std::uint64_t window_ms = frame_ms - state_->frame_window_start_ms;
+    if (window_ms >= 10000) {
+        const auto frames = static_cast<double>(state_->frames - 1);
+        ESP_LOGI(kTag, "display %.1f fps, render %.0f ms, flush %.0f ms, zoom %.2f m/px",
+                 frames * 1000.0 / static_cast<double>(window_ms),
+                 static_cast<double>(state_->frame_window_render_us) / 1000.0 / state_->frames,
+                 static_cast<double>(state_->frame_window_flush_us) / 1000.0 / state_->frames,
+                 static_cast<double>(state_->color_renderer.meters_per_pixel()));
+        state_->frames = 0;
+        state_->frame_window_render_us = 0;
+        state_->frame_window_flush_us = 0;
+    }
+#else
+    (void)frame_ms;
+#endif
 }
 
 void NavigationRuntime::set_phone_connected(const bool connected)

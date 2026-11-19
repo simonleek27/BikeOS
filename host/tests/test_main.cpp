@@ -1,5 +1,7 @@
 #include <cmath>
 #include <algorithm>
+#include <array>
+#include <span>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -9,6 +11,9 @@
 #include <string_view>
 #include <vector>
 
+#include "bikeos/canvas.hpp"
+#include "bikeos/color_renderer.hpp"
+#include "bikeos/fonts.hpp"
 #include "bikeos/framebuffer.hpp"
 #include "bikeos/geo.hpp"
 #include "bikeos/gps.hpp"
@@ -110,6 +115,13 @@ void test_nmea()
     CHECK(gga_fix.has_value());
     CHECK(gga_fix->quality == 1);
     CHECK(std::abs(gga_fix->accuracy_m - 4.5F) < 0.01F);
+
+    // RMC carries the date, so both sentences get a full UTC timestamp.
+    CHECK(fix->utc_epoch_ms == 764426119000LL);  // 1994-03-23 12:35:19 UTC
+    CHECK(gga_fix->utc_epoch_ms == 764426119000LL);
+    bikeos::NmeaParser fresh;
+    CHECK(fresh.parse(gga, 3000)->utc_epoch_ms == 0);  // no date seen yet
+    CHECK(fresh.parse("$GPRMC,,V,,,,,,,,,,N*53", 3000) == std::nullopt);
 }
 
 void test_navigation_and_reroute()
@@ -134,6 +146,9 @@ void test_navigation_and_reroute()
     CHECK(snapshot.cross_track_distance_m < 3.0F);
     CHECK(snapshot.distance_to_maneuver_m > 45.0F && snapshot.distance_to_maneuver_m < 55.0F);
     CHECK(snapshot.next_maneuver->type == bikeos::ManeuverType::right);
+    CHECK(snapshot.following_maneuver.has_value());
+    CHECK(snapshot.following_maneuver->type == bikeos::ManeuverType::left);
+    CHECK(std::abs(snapshot.following_maneuver_gap_m - 100.0F) < 1.0F);
 
     for (std::uint64_t tick = 2; tick <= 6; ++tick) {
         snapshot = engine.update(fix_at(offset(start, 45, 60), tick * 1000), true, tick * 1000);
@@ -168,7 +183,8 @@ void test_map_codec_and_rendering()
     bikeos::MapDataset decoded;
     CHECK(bikeos::decode_map(encoded, decoded));
     CHECK(decoded.point_count() == 4);
-    CHECK(decoded.version == 3);
+    CHECK(decoded.version == 4);
+    CHECK(decoded.areas.empty());
     CHECK(decoded.roads[0].feature_id == 1234);
     CHECK(decoded.roads[0].name == "TESTSTRAAT");
     CHECK(decoded.roads[1].feature_id == 5678);
@@ -257,8 +273,11 @@ void test_amsterdam_assets()
     bikeos::Route route;
     CHECK(bikeos::decode_map(read(BIKEOS_SOURCE_DIR "/data/amsterdam_demo.bmap"), map));
     CHECK(bikeos::decode_route(read(BIKEOS_SOURCE_DIR "/data/amsterdam_demo.brte"), route));
-    CHECK(map.version == 3);
+    CHECK(map.version == 4);
     CHECK(map.roads.size() == 1017);
+    CHECK(map.areas.size() > 50);
+    CHECK(std::any_of(map.areas.begin(), map.areas.end(),
+                      [](const auto& area) { return area.area_class == bikeos::AreaClass::water; }));
     CHECK(map.point_count() == 2936);
     CHECK(route.points.size() == 84);
     CHECK(route.maneuvers.size() == 5);
@@ -324,6 +343,172 @@ void test_ble_protocol()
     CHECK(status.navigation_state == NavigationState::navigating && status.next_maneuver_m == 18);
 }
 
+
+void test_map_areas_codec()
+{
+    const bikeos::GeoPointE7 origin{523600000, 48850000};
+    bikeos::MapDataset map{
+        .version = 4,
+        .origin = origin,
+        .minimum = offset(origin, -300, -300),
+        .maximum = offset(origin, 300, 300),
+        .roads = {{.feature_id = 1, .road_class = bikeos::RoadClass::residential, .name = "Kade",
+                   .points = {offset(origin, -50, 0), offset(origin, 50, 0)}}},
+        .areas = {
+            {.area_class = bikeos::AreaClass::water, .name = "Prinsengracht",
+             .rings = {{offset(origin, -100, -100), offset(origin, 100, -100), offset(origin, 100, 100),
+                        offset(origin, -100, 100)},
+                       {offset(origin, -10, -10), offset(origin, 10, -10), offset(origin, 0, 10)}}},
+            {.area_class = bikeos::AreaClass::park, .name = "",
+             .rings = {{offset(origin, 150, 150), offset(origin, 200, 150), offset(origin, 200, 200)}}},
+        },
+    };
+    const auto encoded = bikeos::encode_map(map);
+    CHECK(!encoded.empty());
+    bikeos::MapDataset decoded;
+    CHECK(bikeos::decode_map(encoded, decoded));
+    CHECK(decoded.areas.size() == 2);
+    CHECK(decoded.areas[0].area_class == bikeos::AreaClass::water);
+    CHECK(decoded.areas[0].name == "Prinsengracht");
+    CHECK(decoded.areas[0].rings.size() == 2);
+    CHECK(decoded.areas[0].rings[1].size() == 3);
+    CHECK(decoded.areas[1].area_class == bikeos::AreaClass::park);
+
+    // A v3 file (no area section) must still decode: drop the area count and
+    // rewrite version, payload size and CRC the way the old encoder did.
+    map.areas.clear();
+    auto v3 = bikeos::encode_map(map);
+    v3.resize(v3.size() - 2);
+    v3[4] = 3;
+    const std::uint32_t payload = static_cast<std::uint32_t>(v3.size() - 48);
+    const std::uint32_t crc = bikeos::crc32(std::span<const std::uint8_t>(v3).subspan(48));
+    for (int i = 0; i < 4; ++i) {
+        v3[40 + i] = static_cast<std::uint8_t>(payload >> (8 * i));
+        v3[44 + i] = static_cast<std::uint8_t>(crc >> (8 * i));
+    }
+    CHECK(bikeos::decode_map(v3, decoded));
+    CHECK(decoded.version == 3);
+    CHECK(decoded.roads.size() == 1);
+    CHECK(decoded.areas.empty());
+}
+
+void test_canvas_and_fonts()
+{
+    bikeos::Canvas565 canvas(40, 30);
+    canvas.clear(0);
+    const std::array<bikeos::PointF, 4> square{{{10, 10}, {30, 10}, {30, 20}, {10, 20}}};
+    canvas.fill_polygon(square, 0xFFFF);
+    std::size_t filled = 0;
+    for (const auto pixel : canvas.pixels()) filled += pixel == 0xFFFF ? 1U : 0U;
+    CHECK(filled == 200);
+
+    const std::array<bikeos::PointF, 4> hole{{{15, 12}, {25, 12}, {25, 18}, {15, 18}}};
+    const std::array<std::span<const bikeos::PointF>, 2> rings{square, hole};
+    canvas.clear(0);
+    canvas.fill_polygon(rings, 0xFFFF);
+    CHECK(canvas.pixel(12, 15) == 0xFFFF);
+    CHECK(canvas.pixel(20, 15) == 0);  // inside the hole
+
+    CHECK(bikeos::blend565(0x0000, 0xFFFF, 0) == 0x0000);
+    CHECK(bikeos::blend565(0x0000, 0xFFFF, 255) == 0xFFFF);
+    const auto half = bikeos::blend565(0x0000, bikeos::rgb565(255, 255, 255), 128);
+    CHECK(((half >> 11U) & 0x1FU) >= 15 && ((half >> 11U) & 0x1FU) <= 16);
+
+    canvas.clear(0);
+    canvas.thick_line({5, 5}, {35, 5}, 4.0F, 0xFFFF);
+    CHECK(canvas.pixel(20, 5) == 0xFFFF);
+    CHECK(canvas.pixel(20, 12) == 0);
+    canvas.set_pixel(-1, -1, 0xFFFF);  // clipped, no crash
+    canvas.set_pixel(40, 30, 0xFFFF);
+
+    std::size_t index = 0;
+    CHECK(bikeos::next_codepoint("\xC3\xA9", index) == 0xE9);  // é
+    CHECK(index == 2);
+    index = 0;
+    CHECK(bikeos::next_codepoint("\xC3", index) == '?');
+    CHECK(bikeos::font_title.find('A') != nullptr);
+    CHECK(bikeos::font_title.find(0xEB) != nullptr);  // ë in Dutch street names
+    CHECK(bikeos::font_distance.find('A') == nullptr);
+    CHECK(bikeos::text_width(bikeos::font_title, "Prinsengracht") > 60);
+    const auto fitted = bikeos::fit_text(bikeos::font_title, "Stadhouderskade Stadhouderskade", 90);
+    CHECK(bikeos::text_width(bikeos::font_title, fitted) <= 90);
+    CHECK(fitted.ends_with("\xE2\x80\xA6"));
+    CHECK(bikeos::fit_text(bikeos::font_title, "Kade", 90) == "Kade");
+
+    bikeos::Canvas565 text_canvas(60, 20);
+    text_canvas.clear(0);
+    CHECK(text_canvas.draw_text(bikeos::font_title, 2, 15, "Hi", 0xFFFF) > 10);
+    std::size_t ink = 0;
+    for (const auto pixel : text_canvas.pixels()) ink += pixel != 0 ? 1U : 0U;
+    CHECK(ink > 20);
+}
+
+void test_time_and_theme()
+{
+    constexpr std::int64_t hour = 3600000;
+    CHECK(bikeos::amsterdam_local_ms(1782907200000LL) - 1782907200000LL == 2 * hour);  // July: CEST
+    CHECK(bikeos::amsterdam_local_ms(1768478400000LL) - 1768478400000LL == 1 * hour);  // January: CET
+    CHECK(bikeos::amsterdam_local_ms(1774745940000LL) - 1774745940000LL == 1 * hour);  // 2026-03-29 00:59 UTC
+    CHECK(bikeos::amsterdam_local_ms(1774746000000LL) - 1774746000000LL == 2 * hour);  // 01:00 UTC switch
+
+    const bikeos::GeoPointE7 amsterdam{523600000, 48850000};
+    const double noon = bikeos::solar_elevation_deg(1782042000000LL, amsterdam);    // 2026-06-21 11:40 UTC
+    const double night = bikeos::solar_elevation_deg(1782085200000LL, amsterdam);   // 2026-06-21 23:40 UTC
+    CHECK(noon > 58.0 && noon < 64.0);
+    CHECK(night < -5.0);
+    CHECK(!bikeos::night_theme({.utc_epoch_ms = 1795091400000LL}, amsterdam));  // 2026-11-19 12:30 UTC
+    CHECK(bikeos::night_theme({.utc_epoch_ms = 1795118400000LL}, amsterdam));   // 20:00 UTC
+    CHECK(bikeos::night_theme({}, amsterdam));  // no clock yet
+    CHECK(!bikeos::night_theme({.theme = bikeos::ThemeMode::day}, amsterdam));
+
+    CHECK(bikeos::format_distance(45.0F) == "45 m");
+    CHECK(bikeos::format_distance(183.0F) == "180 m");
+    CHECK(bikeos::format_distance(996.0F) == "1.0 km");
+    CHECK(bikeos::format_distance(1234.0F) == "1.2 km");
+    CHECK(bikeos::format_distance(12345.0F) == "12 km");
+}
+
+void test_color_renderer()
+{
+    const auto route = make_route();
+    bikeos::MapDataset map{
+        .version = 4,
+        .origin = route.points.front(),
+        .minimum = offset(route.points.front(), -300, -300),
+        .maximum = offset(route.points.front(), 300, 400),
+        .roads = {{.feature_id = 1, .road_class = bikeos::RoadClass::cycleway, .name = "Fietspad",
+                   .points = {offset(route.points.front(), -50, -100), offset(route.points.front(), -50, 250)}}},
+        .areas = {{.area_class = bikeos::AreaClass::water, .name = "Gracht",
+                   .rings = {{offset(route.points.front(), 30, 0), offset(route.points.front(), 60, 0),
+                              offset(route.points.front(), 60, 200), offset(route.points.front(), 30, 200)}}}},
+    };
+    bikeos::NavigationEngine engine;
+    CHECK(engine.set_route(route));
+    const auto nav = engine.update(fix_at(offset(route.points.front(), 0, 20), 1000), true, 1000);
+    bikeos::Canvas565 canvas;
+    bikeos::ColorMapRenderer renderer;
+    renderer.render(canvas, map, route.points, nav, {.utc_epoch_ms = 1795091400000LL});  // daytime
+    const auto card = renderer.card_rect();
+    CHECK(card.x == 6 && card.y == 6 && card.width >= 150 && card.height >= 70);
+    CHECK(canvas.pixel(card.x + card.width / 2, card.y + 3) == bikeos::rgb565(0xFF, 0xFF, 0xFF));  // day card
+    std::size_t magenta = 0;
+    for (const auto pixel : canvas.pixels()) magenta += pixel == bikeos::rgb565(0xD6, 0x00, 0x6F) ? 1U : 0U;
+    CHECK(magenta > 200);  // the route ahead
+    // Turn is 80 m ahead: the zoom eases in towards the turn level.
+    for (int i = 0; i < 10; ++i) renderer.render(canvas, map, route.points, nav, {});
+    CHECK(renderer.meters_per_pixel() < 1.0F);
+    CHECK(canvas.pixel(card.x + card.width / 2, card.y + 3) == bikeos::rgb565(0x1F, 0x24, 0x2B));  // night, no clock
+
+    bikeos::NavigationEngine lost;
+    CHECK(lost.set_route(route));
+    lost.update(fix_at(offset(route.points.front(), 0, 30), 1000), true, 1000);
+    const auto gone = lost.update(std::nullopt, true, 9000);
+    CHECK(gone.state == bikeos::NavigationState::gps_lost);
+    bikeos::ColorMapRenderer fresh;
+    fresh.render(canvas, map, route.points, gone, {.theme = bikeos::ThemeMode::day});
+    CHECK(canvas.pixel(fresh.card_rect().x + 20, fresh.card_rect().y + 3) == bikeos::rgb565(0xFB, 0xD0, 0xD0));
+}
+
 }  // namespace
 
 int main()
@@ -336,6 +521,10 @@ int main()
     test_simulated_ride();
     test_amsterdam_assets();
     test_ble_protocol();
+    test_map_areas_codec();
+    test_canvas_and_fonts();
+    test_time_and_theme();
+    test_color_renderer();
     if (failures != 0) {
         std::cerr << failures << " test assertion(s) failed\n";
         return EXIT_FAILURE;

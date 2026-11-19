@@ -16,6 +16,9 @@ enum class GpsSource : std::uint8_t {
 struct GpsFix {
     GeoPointE7 position{};
     std::uint64_t utc_timestamp_ms{};
+    // Milliseconds since 1970-01-01 UTC, or 0 when the receiver has not
+    // reported a date yet. utc_timestamp_ms is time of day only for NMEA.
+    std::int64_t utc_epoch_ms{};
     std::uint64_t monotonic_timestamp_ms{};
     float speed_mps{};
     float heading_deg{};

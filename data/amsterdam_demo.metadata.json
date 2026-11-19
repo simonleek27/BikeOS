@@ -15,5 +15,13 @@
   "map_points": 2936,
   "route_points": 84,
   "route_distance_m": 1409.7,
-  "maneuvers": 5
+  "maneuvers": 5,
+  "map_format_version": 4,
+  "areas": {
+    "water": 74,
+    "park": 483,
+    "area_points": 4723,
+    "added_by": "tools/add_map_areas.py",
+    "added_utc": "2026-11-19"
+  }
 }

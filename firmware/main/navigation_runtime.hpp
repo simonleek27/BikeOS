@@ -11,6 +11,10 @@ class NavigationRuntime {
 public:
     bool initialize();
     void step(std::uint64_t now_ms);
+    // Draws one display frame. On the color TFT this runs several times per
+    // second and glides the map between 1 Hz navigation steps; `frame_ms` is a
+    // monotonic millisecond clock. No-op for displays redrawn by step().
+    void render_frame(std::uint64_t frame_ms);
     void set_phone_connected(bool connected);
     protocol::Status status() const;
     bool consume_reroute_request();

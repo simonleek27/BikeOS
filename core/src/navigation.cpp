@@ -117,13 +117,21 @@ std::optional<NavigationEngine::MatchResult> NavigationEngine::match_position(co
 void NavigationEngine::update_next_maneuver()
 {
     snapshot_.next_maneuver.reset();
+    snapshot_.following_maneuver.reset();
+    snapshot_.following_maneuver_gap_m = 0.0F;
     snapshot_.distance_to_maneuver_m = snapshot_.route_remaining_m;
     if (!route_) return;
-    for (const auto& maneuver : route_->maneuvers) {
-        const float maneuver_progress = route_->cumulative_distance_m[maneuver.point_index];
+    const auto& maneuvers = route_->maneuvers;
+    for (std::size_t i = 0; i < maneuvers.size(); ++i) {
+        const float maneuver_progress = route_->cumulative_distance_m[maneuvers[i].point_index];
         if (maneuver_progress + 5.0F >= snapshot_.route_progress_m) {
-            snapshot_.next_maneuver = maneuver;
+            snapshot_.next_maneuver = maneuvers[i];
             snapshot_.distance_to_maneuver_m = std::max(0.0F, maneuver_progress - snapshot_.route_progress_m);
+            if (i + 1 < maneuvers.size()) {
+                snapshot_.following_maneuver = maneuvers[i + 1];
+                snapshot_.following_maneuver_gap_m = std::max(
+                    0.0F, route_->cumulative_distance_m[maneuvers[i + 1].point_index] - maneuver_progress);
+            }
             return;
         }
     }

@@ -3,6 +3,9 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <vector>
+
+#include "bikeos/canvas.hpp"
 #include "bikeos/framebuffer.hpp"
 
 namespace bikeos {
@@ -29,6 +32,10 @@ public:
 
     bool initialize();
     bool flush(const Framebuffer& framebuffer);
+    // Sends a full-color 320x240 frame. Only 8-row bands that changed since
+    // the previous call are transferred; returns the number of rows sent via
+    // `rows_sent` when given.
+    bool flush(const Canvas565& canvas, int* rows_sent = nullptr);
     bool show_test_pattern();
 
 private:
@@ -39,6 +46,9 @@ private:
     bool write_row(const std::uint8_t* bytes, std::size_t count);
 
     Ili9341Config config_;
+    std::uint8_t* dma_buffer_{};  // kChunkRows rows of big-endian RGB565
+    std::vector<std::uint16_t> previous_frame_;
+    bool have_previous_frame_{};
     void* device_{};
     bool bus_initialized_{};
     bool initialized_{};

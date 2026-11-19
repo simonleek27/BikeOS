@@ -69,6 +69,31 @@ std::optional<std::uint64_t> parse_utc_time_ms(const std::string_view hhmmss)
     return static_cast<std::uint64_t>(std::llround((hour * 3600.0 + minute * 60.0 + seconds) * 1000.0));
 }
 
+// Days since 1970-01-01 for a proleptic Gregorian date (Howard Hinnant's algorithm).
+std::int64_t days_from_civil(std::int64_t year, const unsigned month, const unsigned day)
+{
+    year -= month <= 2 ? 1 : 0;
+    const std::int64_t era = (year >= 0 ? year : year - 399) / 400;
+    const auto year_of_era = static_cast<unsigned>(year - era * 400);
+    const unsigned day_of_year = (153 * (month > 2 ? month - 3 : month + 9) + 2) / 5 + day - 1;
+    const unsigned day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    return era * 146097 + static_cast<std::int64_t>(day_of_era) - 719468;
+}
+
+// RMC date field ddmmyy. GPS time starts in 1980, so yy 80-99 is 19yy and 00-79 is 20yy.
+std::optional<std::int64_t> parse_utc_day_ms(const std::string_view ddmmyy)
+{
+    if (ddmmyy.size() != 6 || !std::all_of(ddmmyy.begin(), ddmmyy.end(), [](char c) { return c >= '0' && c <= '9'; })) {
+        return std::nullopt;
+    }
+    const auto two = [&](const std::size_t at) { return static_cast<unsigned>((ddmmyy[at] - '0') * 10 + (ddmmyy[at + 1] - '0')); };
+    const unsigned day = two(0);
+    const unsigned month = two(2);
+    const unsigned year = (two(4) >= 80 ? 1900 : 2000) + two(4);
+    if (day < 1 || day > 31 || month < 1 || month > 12) return std::nullopt;
+    return days_from_civil(year, month, day) * 86400000LL;
+}
+
 }  // namespace
 
 bool NmeaParser::checksum_valid(const std::string_view sentence)
@@ -111,6 +136,10 @@ std::optional<GpsFix> NmeaParser::parse(const std::string_view sentence,
             .position_valid = fields[2] == "A",
             .heading_valid = heading.has_value() && *speed_knots >= 0.5,
         };
+        if (const auto day_ms = parse_utc_day_ms(fields[9])) {
+            utc_day_ms_ = *day_ms;
+            fix.utc_epoch_ms = *day_ms + static_cast<std::int64_t>(*time_ms);
+        }
         last_rmc_ = fix;
         return fix;
     }
@@ -125,6 +154,7 @@ std::optional<GpsFix> NmeaParser::parse(const std::string_view sentence,
         GpsFix fix = last_rmc_.value_or(GpsFix{});
         fix.position = *position;
         fix.utc_timestamp_ms = *time_ms;
+        fix.utc_epoch_ms = utc_day_ms_ ? *utc_day_ms_ + static_cast<std::int64_t>(*time_ms) : 0;
         fix.monotonic_timestamp_ms = monotonic_timestamp_ms;
         fix.accuracy_m = static_cast<float>(hdop.value_or(10.0) * 5.0);
         fix.source = GpsSource::uart_nmea;

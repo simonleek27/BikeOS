@@ -6,6 +6,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(bikeos_core STATIC
+    core/src/canvas.cpp
+    core/src/color_renderer.cpp
+    core/src/font_data.cpp
+    core/src/fonts.cpp
     core/src/framebuffer.cpp
     core/src/geo.cpp
     core/src/gps.cpp
@@ -27,12 +31,26 @@ target_compile_definitions(bikeos_tests PRIVATE BIKEOS_SOURCE_DIR="${CMAKE_SOURC
 target_compile_options(bikeos_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_test(NAME bikeos_core_tests COMMAND bikeos_tests)
 
-find_package(SDL2 CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
-add_executable(bikeos_simulator
-    host/simulator/main.cpp
+add_executable(bikeos_color_preview
+    host/preview/main.cpp
     host/simulator/png_writer.cpp
 )
-target_link_libraries(bikeos_simulator PRIVATE bikeos_core SDL2::SDL2 ZLIB::ZLIB)
-target_compile_definitions(bikeos_simulator PRIVATE BIKEOS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-target_compile_options(bikeos_simulator PRIVATE -Wall -Wextra -Wpedantic -Werror)
+target_link_libraries(bikeos_color_preview PRIVATE bikeos_core ZLIB::ZLIB)
+target_include_directories(bikeos_color_preview PRIVATE host/simulator)
+target_compile_definitions(bikeos_color_preview PRIVATE BIKEOS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(bikeos_color_preview PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+# The interactive monochrome simulator needs SDL2; skip it when SDL2 is absent.
+find_package(SDL2 CONFIG QUIET)
+if(SDL2_FOUND)
+    add_executable(bikeos_simulator
+        host/simulator/main.cpp
+        host/simulator/png_writer.cpp
+    )
+    target_link_libraries(bikeos_simulator PRIVATE bikeos_core SDL2::SDL2 ZLIB::ZLIB)
+    target_compile_definitions(bikeos_simulator PRIVATE BIKEOS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    target_compile_options(bikeos_simulator PRIVATE -Wall -Wextra -Wpedantic -Werror)
+else()
+    message(STATUS "SDL2 not found; building without bikeos_simulator")
+endif()

@@ -74,6 +74,9 @@ struct NavigationSnapshot {
     float route_remaining_m{};
     std::optional<Maneuver> next_maneuver;
     float distance_to_maneuver_m{};
+    // The maneuver after next_maneuver, and the distance between the two.
+    std::optional<Maneuver> following_maneuver;
+    float following_maneuver_gap_m{};
     float heading_deg{};
     bool gps_valid{};
     bool heading_valid{};

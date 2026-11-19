@@ -17,20 +17,13 @@ constexpr char kTag[] = "ili9341";
 constexpr std::uint16_t kWidth = 320;
 constexpr std::uint16_t kHeight = 240;
 constexpr std::size_t kRowBytes = static_cast<std::size_t>(kWidth) * 2U;
+constexpr int kChunkRows = 8;  // rows per SPI transfer, and the dirty-band height
 
 void put_be16(std::uint8_t* destination, const std::uint16_t value)
 {
     destination[0] = static_cast<std::uint8_t>(value >> 8U);
     destination[1] = static_cast<std::uint8_t>(value & 0xFFU);
 }
-
-std::uint16_t rgb565(const std::uint8_t red, const std::uint8_t green, const std::uint8_t blue)
-{
-    return static_cast<std::uint16_t>(((red & 0xF8U) << 8U) |
-                                      ((green & 0xFCU) << 3U) |
-                                      (blue >> 3U));
-}
-
 }  // namespace
 
 Ili9341Display::Ili9341Display(Ili9341Config config) : config_(config) {}
@@ -38,6 +31,7 @@ Ili9341Display::Ili9341Display(Ili9341Config config) : config_(config) {}
 Ili9341Display::~Ili9341Display()
 {
     if (device_) spi_bus_remove_device(static_cast<spi_device_handle_t>(device_));
+    if (dma_buffer_) heap_caps_free(dma_buffer_);
     if (bus_initialized_) spi_bus_free(static_cast<spi_host_device_t>(config_.spi_host));
 }
 
@@ -70,11 +64,16 @@ bool Ili9341Display::initialize()
         .data6_io_num = -1,
         .data7_io_num = -1,
         .data_io_default_level = false,
-        .max_transfer_sz = static_cast<int>(kRowBytes),
+        .max_transfer_sz = static_cast<int>(kRowBytes * kChunkRows),
         .flags = 0,
         .isr_cpu_id = ESP_INTR_CPU_AFFINITY_AUTO,
         .intr_flags = 0,
     };
+    dma_buffer_ = static_cast<std::uint8_t*>(heap_caps_malloc(kRowBytes * kChunkRows, MALLOC_CAP_DMA));
+    if (!dma_buffer_) {
+        ESP_LOGE(kTag, "No DMA memory for the TFT transfer buffer");
+        return false;
+    }
     const auto host = static_cast<spi_host_device_t>(config_.spi_host);
     if (spi_bus_initialize(host, &bus_config, SPI_DMA_CH_AUTO) != ESP_OK) return false;
     bus_initialized_ = true;
@@ -202,6 +201,54 @@ bool Ili9341Display::flush(const Framebuffer& framebuffer)
         }
         if (!write_row(row.data(), row.size())) return false;
     }
+    return true;
+}
+
+bool Ili9341Display::flush(const Canvas565& canvas, int* rows_sent)
+{
+    if (rows_sent) *rows_sent = 0;
+    if (!initialized_ || canvas.width() != kWidth || canvas.height() != kHeight) return false;
+    const auto pixels = canvas.pixels();
+    if (previous_frame_.size() != pixels.size()) {
+        previous_frame_.assign(pixels.size(), 0);
+        have_previous_frame_ = false;
+    }
+    int band = 0;
+    while (band * kChunkRows < kHeight) {
+        const auto changed = [&](const int index) {
+            const std::size_t start = static_cast<std::size_t>(index) * kChunkRows * kWidth;
+            const std::size_t count = std::min<std::size_t>(kChunkRows * kWidth, pixels.size() - start);
+            return !have_previous_frame_ ||
+                   !std::equal(pixels.begin() + start, pixels.begin() + start + count, previous_frame_.begin() + start);
+        };
+        if (!changed(band)) {
+            ++band;
+            continue;
+        }
+        // Merge consecutive changed bands into one window.
+        int end = band + 1;
+        while (end * kChunkRows < kHeight && changed(end)) ++end;
+        const int top = band * kChunkRows;
+        const int bottom = std::min<int>(kHeight, end * kChunkRows);
+        if (!set_window(0, static_cast<std::uint16_t>(top), kWidth - 1, static_cast<std::uint16_t>(bottom - 1))) {
+            return false;
+        }
+        for (int y = top; y < bottom; y += kChunkRows) {
+            const int rows = std::min(kChunkRows, bottom - y);
+            for (int row = 0; row < rows; ++row) {
+                const auto source = canvas.row(y + row);
+                std::uint8_t* destination = dma_buffer_ + static_cast<std::size_t>(row) * kRowBytes;
+                for (int x = 0; x < kWidth; ++x) put_be16(destination + x * 2, source[static_cast<std::size_t>(x)]);
+            }
+            if (!data(dma_buffer_, static_cast<std::size_t>(rows) * kRowBytes)) return false;
+        }
+        std::copy(pixels.begin() + static_cast<std::ptrdiff_t>(top) * kWidth,
+                  pixels.begin() + static_cast<std::ptrdiff_t>(bottom) * kWidth,
+                  previous_frame_.begin() + static_cast<std::ptrdiff_t>(top) * kWidth);
+        if (rows_sent) *rows_sent += bottom - top;
+        band = end;
+    }
+    have_previous_frame_ = true;
     return true;
 }
 

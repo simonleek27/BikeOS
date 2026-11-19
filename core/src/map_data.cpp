@@ -10,7 +10,7 @@ namespace bikeos {
 namespace {
 
 constexpr std::array<std::uint8_t, 4> kMagic{'B', 'M', 'A', 'P'};
-constexpr std::uint16_t kFormatVersion = 3;
+constexpr std::uint16_t kFormatVersion = 4;
 constexpr std::int32_t kQuantizationE7 = 10;  // 1e-6 degrees.
 
 template <typename T>
@@ -54,23 +54,37 @@ bool MapDataset::valid() const
         point_count() > 1000000) {
         return false;
     }
+    const auto fits = [this](const GeoPointE7 point) {
+        if (!valid_coordinate(point)) return false;
+        const auto lat_offset = (point.latitude_e7 - origin.latitude_e7) / kQuantizationE7;
+        const auto lon_offset = (point.longitude_e7 - origin.longitude_e7) / kQuantizationE7;
+        return lat_offset >= std::numeric_limits<std::int16_t>::min() &&
+               lat_offset <= std::numeric_limits<std::int16_t>::max() &&
+               lon_offset >= std::numeric_limits<std::int16_t>::min() &&
+               lon_offset <= std::numeric_limits<std::int16_t>::max();
+    };
     for (const auto& road : roads) {
         if (road.points.size() < 2 || road.points.size() > 65535 || road.name.size() > 96 ||
             !std::all_of(road.points.begin(), road.points.end(), valid_coordinate)) {
             return false;
         }
-        for (const auto point : road.points) {
-            const auto lat_offset = (point.latitude_e7 - origin.latitude_e7) / kQuantizationE7;
-            const auto lon_offset = (point.longitude_e7 - origin.longitude_e7) / kQuantizationE7;
-            if (lat_offset < std::numeric_limits<std::int16_t>::min() ||
-                lat_offset > std::numeric_limits<std::int16_t>::max() ||
-                lon_offset < std::numeric_limits<std::int16_t>::min() ||
-                lon_offset > std::numeric_limits<std::int16_t>::max()) {
+        if (!std::all_of(road.points.begin(), road.points.end(), fits)) return false;
+    }
+    if (areas.size() > 65535 || (version < 4 && !areas.empty())) return false;
+    std::size_t area_points = 0;
+    for (const auto& area : areas) {
+        if (area.rings.empty() || area.rings.size() > 255 || area.name.size() > 96 ||
+            static_cast<std::uint8_t>(area.area_class) > 1) {
+            return false;
+        }
+        for (const auto& ring : area.rings) {
+            if (ring.size() < 3 || ring.size() > 65535 || !std::all_of(ring.begin(), ring.end(), fits)) {
                 return false;
             }
+            area_points += ring.size();
         }
     }
-    return true;
+    return area_points <= 1000000;
 }
 
 std::uint32_t crc32(const std::span<const std::uint8_t> data)
@@ -91,9 +105,11 @@ std::vector<std::uint8_t> encode_map(const MapDataset& map)
     std::vector<std::uint8_t> payload;
     std::vector<std::string> names;
     names.reserve(map.roads.size());
-    for (const auto& road : map.roads) {
-        if (std::find(names.begin(), names.end(), road.name) == names.end()) names.push_back(road.name);
-    }
+    const auto intern = [&names](const std::string& name) {
+        if (std::find(names.begin(), names.end(), name) == names.end()) names.push_back(name);
+    };
+    for (const auto& road : map.roads) intern(road.name);
+    for (const auto& area : map.areas) intern(area.name);
     if (names.size() > 65535) return {};
     payload.reserve(map.point_count() * 4 + map.roads.size() * 9 + names.size() * 8);
     append_le(payload, static_cast<std::uint16_t>(names.size()));
@@ -101,16 +117,25 @@ std::vector<std::uint8_t> encode_map(const MapDataset& map)
         append_le(payload, static_cast<std::uint8_t>(name.size()));
         payload.insert(payload.end(), name.begin(), name.end());
     }
+    const auto append_point = [&](const GeoPointE7 point) {
+        append_le(payload, static_cast<std::int16_t>((point.latitude_e7 - map.origin.latitude_e7) / kQuantizationE7));
+        append_le(payload, static_cast<std::int16_t>((point.longitude_e7 - map.origin.longitude_e7) / kQuantizationE7));
+    };
     for (const auto& road : map.roads) {
         append_le(payload, static_cast<std::uint8_t>(road.road_class));
         append_le(payload, road.feature_id);
         append_le(payload, static_cast<std::uint16_t>(road.points.size()));
         append_le(payload, static_cast<std::uint16_t>(std::find(names.begin(), names.end(), road.name) - names.begin()));
-        for (const auto point : road.points) {
-            append_le(payload, static_cast<std::int16_t>((point.latitude_e7 - map.origin.latitude_e7) /
-                                                         kQuantizationE7));
-            append_le(payload, static_cast<std::int16_t>((point.longitude_e7 - map.origin.longitude_e7) /
-                                                         kQuantizationE7));
+        for (const auto point : road.points) append_point(point);
+    }
+    append_le(payload, static_cast<std::uint16_t>(map.areas.size()));
+    for (const auto& area : map.areas) {
+        append_le(payload, static_cast<std::uint8_t>(area.area_class));
+        append_le(payload, static_cast<std::uint16_t>(std::find(names.begin(), names.end(), area.name) - names.begin()));
+        append_le(payload, static_cast<std::uint8_t>(area.rings.size()));
+        for (const auto& ring : area.rings) {
+            append_le(payload, static_cast<std::uint16_t>(ring.size()));
+            for (const auto point : ring) append_point(point);
         }
     }
 
@@ -163,7 +188,7 @@ bool decode_map(const std::span<const std::uint8_t> encoded, MapDataset& output)
     candidate.roads.reserve(road_count);
     std::size_t decoded_points = 0;
     std::vector<std::string> names;
-    if (version == 3) {
+    if (version >= 3) {
         std::uint16_t name_count = 0;
         if (!read_le(encoded, offset, name_count)) return false;
         names.reserve(name_count);
@@ -205,7 +230,7 @@ bool decode_map(const std::span<const std::uint8_t> encoded, MapDataset& output)
         if (version == 2) {
             road.name = std::string(reinterpret_cast<const char*>(encoded.data() + offset), name_length);
             offset += name_length;
-        } else if (version == 3) {
+        } else if (version >= 3) {
             road.name = names[name_index];
         } else {
             // Version 1 used the second byte as a reserved field and had no
@@ -224,6 +249,40 @@ bool decode_map(const std::span<const std::uint8_t> encoded, MapDataset& output)
         }
         decoded_points += point_count;
         candidate.roads.push_back(std::move(road));
+    }
+    if (version >= 4) {
+        std::uint16_t area_count = 0;
+        if (!read_le(encoded, offset, area_count)) return false;
+        candidate.areas.reserve(area_count);
+        for (std::uint16_t area_index = 0; area_index < area_count; ++area_index) {
+            std::uint8_t area_class = 0;
+            std::uint16_t name_index = 0;
+            std::uint8_t ring_count = 0;
+            if (!read_le(encoded, offset, area_class) || !read_le(encoded, offset, name_index) ||
+                !read_le(encoded, offset, ring_count) || area_class > 1 || name_index >= names.size() ||
+                ring_count == 0) {
+                return false;
+            }
+            AreaPolygon area;
+            area.area_class = static_cast<AreaClass>(area_class);
+            area.name = names[name_index];
+            area.rings.resize(ring_count);
+            for (auto& ring : area.rings) {
+                std::uint16_t ring_points = 0;
+                if (!read_le(encoded, offset, ring_points) || ring_points < 3) return false;
+                ring.reserve(ring_points);
+                for (std::uint16_t i = 0; i < ring_points; ++i) {
+                    std::int16_t lat_offset = 0;
+                    std::int16_t lon_offset = 0;
+                    if (!read_le(encoded, offset, lat_offset) || !read_le(encoded, offset, lon_offset)) return false;
+                    ring.push_back({
+                        .latitude_e7 = candidate.origin.latitude_e7 + lat_offset * kQuantizationE7,
+                        .longitude_e7 = candidate.origin.longitude_e7 + lon_offset * kQuantizationE7,
+                    });
+                }
+            }
+            candidate.areas.push_back(std::move(area));
+        }
     }
     if (offset != encoded.size() || decoded_points != expected_points || !candidate.valid()) return false;
     output = std::move(candidate);

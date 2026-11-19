@@ -28,12 +28,26 @@ struct RoadPolyline {
     std::vector<GeoPointE7> points;
 };
 
+enum class AreaClass : std::uint8_t {
+    water,
+    park,
+};
+
+// A filled area. The first ring is the outline; further rings are holes
+// (islands in a canal, a pond in a park). Filled with the even-odd rule.
+struct AreaPolygon {
+    AreaClass area_class{AreaClass::water};
+    std::string name;
+    std::vector<std::vector<GeoPointE7>> rings;
+};
+
 struct MapDataset {
-    std::uint16_t version{3};
+    std::uint16_t version{4};
     GeoPointE7 origin{};
     GeoPointE7 minimum{};
     GeoPointE7 maximum{};
     std::vector<RoadPolyline> roads;
+    std::vector<AreaPolygon> areas;  // version 4 and later
 
     std::size_t point_count() const;
     bool valid() const;
