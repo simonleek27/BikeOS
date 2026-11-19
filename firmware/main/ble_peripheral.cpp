@@ -107,7 +107,8 @@ void send_ack(const std::uint32_t transfer_id,
 int access_device_info(uint16_t, uint16_t, ble_gatt_access_ctxt* ctxt, void*)
 {
     if (ctxt->op != BLE_GATT_ACCESS_OP_READ_CHR) return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
-    constexpr char info[] = "BikeOS firmware=0.2.0 protocol=1 capabilities=sim-gps,bmap-v3,brte-v1";
+    constexpr char info[] =
+        "BikeOS firmware=0.3.0 protocol=1 capabilities=sim-gps,bmap-v4,brte-v1,nav-controls";
     return os_mbuf_append(ctxt->om, info, sizeof(info) - 1) == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 
@@ -134,9 +135,27 @@ int access_control(uint16_t, uint16_t, ble_gatt_access_ctxt* ctxt, void*)
         send_ack(frame.header.transfer_id, frame.header.sequence, acknowledgement);
         return 0;
     }
+    const bool is_navigation_command = frame.header.type == protocol::MessageType::start_navigation ||
+                                       frame.header.type == protocol::MessageType::cancel_navigation ||
+                                       frame.header.type == protocol::MessageType::pause_navigation ||
+                                       frame.header.type == protocol::MessageType::resume_navigation ||
+                                       frame.header.type == protocol::MessageType::restart_navigation ||
+                                       frame.header.type == protocol::MessageType::stop_navigation ||
+                                       frame.header.type == protocol::MessageType::trigger_off_route;
+    if (is_navigation_command) {
+        acknowledgement.result = g_transfer.active ? protocol::ResultCode::busy
+                                                    : g_instance->handle_navigation_command(frame.header.type);
+        send_ack(frame.header.transfer_id, frame.header.sequence, acknowledgement);
+        return 0;
+    }
     if (frame.header.type == protocol::MessageType::transfer_begin) {
         protocol::TransferBegin begin{};
-        if (!protocol::decode_transfer_begin(frame.payload, begin) || begin.bundle_id == 0) {
+        if (g_transfer.active) {
+            acknowledgement.result = protocol::ResultCode::busy;
+        } else if (!protocol::decode_transfer_begin(frame.payload, begin) || begin.bundle_id == 0 ||
+                   begin.route_id == 0 || begin.map_size == 0 || begin.route_size == 0 ||
+                   begin.map_size > protocol::max_bundle_size || begin.route_size > protocol::max_bundle_size ||
+                   begin.route_size > protocol::max_bundle_size - begin.map_size) {
             acknowledgement.result = protocol::ResultCode::invalid_transfer;
         } else {
             g_transfer = {};
@@ -191,10 +210,17 @@ int access_data(uint16_t, uint16_t, ble_gatt_access_ctxt* ctxt, void*)
     if (!flatten(ctxt->om, bytes)) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     protocol::DecodedFrame frame;
     protocol::TransferChunk chunk;
-    if (!protocol::decode_frame(bytes, frame) || frame.header.type != protocol::MessageType::transfer_chunk ||
+    const bool decoded = protocol::decode_frame(bytes, frame);
+    if (!decoded || frame.header.type != protocol::MessageType::transfer_chunk ||
         !protocol::decode_transfer_chunk(frame.payload, chunk) || !g_transfer.active ||
         frame.header.transfer_id != g_transfer.transfer_id || chunk.offset != g_transfer.next_offset ||
         chunk.offset + chunk.bytes.size() > g_transfer.bundle.size()) {
+        if (g_transfer.active && decoded) {
+            send_ack(frame.header.transfer_id, frame.header.sequence,
+                     {.result = protocol::ResultCode::invalid_offset,
+                      .next_offset = g_transfer.next_offset,
+                      .bundle_id = g_transfer.begin.bundle_id});
+        }
         return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     }
     std::copy(chunk.bytes.begin(), chunk.bytes.end(), g_transfer.bundle.begin() + chunk.offset);
@@ -309,11 +335,13 @@ void advertise()
 
 bool BlePeripheral::initialize(StatusProvider status_provider,
                                BundleHandler bundle_handler,
-                               ConnectionHandler connection_handler)
+                               ConnectionHandler connection_handler,
+                               CommandHandler command_handler)
 {
     status_provider_ = std::move(status_provider);
     bundle_handler_ = std::move(bundle_handler);
     connection_handler_ = std::move(connection_handler);
+    command_handler_ = std::move(command_handler);
     g_instance = this;
     esp_err_t nvs_result = nvs_flash_init();
     if (nvs_result == ESP_ERR_NVS_NO_FREE_PAGES || nvs_result == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -348,6 +376,11 @@ protocol::ResultCode BlePeripheral::handle_bundle(const std::uint32_t bundle_id,
 {
     return bundle_handler_ ? bundle_handler_(bundle_id, begin, map_bytes, route_bytes)
                            : protocol::ResultCode::invalid_transfer;
+}
+
+protocol::ResultCode BlePeripheral::handle_navigation_command(const protocol::MessageType command) const
+{
+    return command_handler_ ? command_handler_(command) : protocol::ResultCode::unauthorized;
 }
 
 void BlePeripheral::notify_status(const protocol::Status& status)

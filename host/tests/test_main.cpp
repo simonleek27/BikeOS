@@ -157,6 +157,12 @@ void test_navigation_and_reroute()
     CHECK(snapshot.reroute_requested);
     snapshot = engine.update(fix_at(offset(start, 45, 65), 7000), true, 7000);
     CHECK(!snapshot.reroute_requested);
+
+    engine.set_phone_connected(false);
+    CHECK(engine.snapshot().state == bikeos::NavigationState::phone_disconnected);
+    CHECK(!engine.snapshot().phone_connected);
+    engine.set_phone_connected(true);
+    CHECK(engine.snapshot().phone_connected);
 }
 
 void test_map_codec_and_rendering()
@@ -341,6 +347,11 @@ void test_ble_protocol()
     Status status;
     CHECK(decode_status(status_payload, status));
     CHECK(status.navigation_state == NavigationState::navigating && status.next_maneuver_m == 18);
+
+    const auto command = encode_frame(
+        {.type = MessageType::trigger_off_route, .transfer_id = 0, .sequence = 8, .flags = 0}, {});
+    CHECK(decode_frame(command, decoded));
+    CHECK(decoded.header.type == MessageType::trigger_off_route);
 }
 
 

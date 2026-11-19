@@ -22,6 +22,7 @@ public:
                                         const protocol::TransferBegin& begin,
                                         std::span<const std::uint8_t> map_bytes,
                                         std::span<const std::uint8_t> route_bytes);
+    protocol::ResultCode handle_navigation_command(protocol::MessageType command);
 
 private:
     struct State;

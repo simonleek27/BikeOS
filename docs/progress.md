@@ -1,6 +1,6 @@
 # Development progress
 
-Updated: 18 November 2026
+Updated: 19 November 2026
 
 | Feature | Status | Evidence / next action |
 |---|---|---|
@@ -15,31 +15,31 @@ Updated: 18 November 2026
 | LCD identification | Complete | ERC12864SBSF-14, ST7565R, 128 × 64, 30-pin 0.5 mm FPC |
 | LCD SPI driver | Implemented, not physically tested | Needs bottom-contact carrier and charge-pump capacitor network |
 | LCD wiring | Blocked on physical carrier | Provide adapter/carrier and clear ESP board photos; then assign GPIOs |
-| BLE route transfer | ACK-driven implementation | iPhone now waits for begin/chunk/commit ACKs, sends one bounded chunk at a time, validates transfer/bundle IDs, and verifies the activated route ID from status; physical repeat is the next verification |
-| iPhone app | Physical-demo ready | SwiftUI now decodes the bundled BRTE route (points + street maneuvers), renders the full route, shows live ESP32 position/status, and exposes transfer progress; GraphHopper response parsing is implemented but needs an API key |
+| BLE route transfer | ACK-driven implementation | iPhone waits for begin/chunk/commit ACKs, sends bounded chunks, validates transfer/bundle IDs, and verifies the activated route ID from status |
+| iPhone app | Physical-demo ready | SwiftUI renders the bundled route, follows authoritative ESP32 telemetry, exposes Start/Pause/Resume/Restart/Stop/off-route controls, and builds successfully for the iOS simulator |
+| Indoor simulator controls | Complete | Deterministic 4.5 m/s simulator pauses after transfer, supports explicit control frames, and has repeatable off-route/GPS-loss events |
 
 ## Current assessment
 
 The data pipeline, navigation behavior, shared framebuffer, simulator, physical
-ESP execution, and the first real iPhone↔ESP32 BLE connection are working. The
-iPhone and ESP32 now share the same validated BRTE route metadata, and transfer
-progress is driven by acknowledgements rather than a blind write burst. The
-LCD is still not physically wired, so pixel output remains simulator/
-firmware-framebuffer verified only. GPS is still the deterministic scripted
-source; no physical GPS module is connected.
+ESP execution, verified ILI9341 TFT, and the first real iPhone↔ESP32 BLE
+connection are working. The iPhone and ESP32 share the same validated BRTE
+route metadata, and transfer progress is driven by acknowledgements rather than
+a blind write burst. GPS is currently the deterministic scripted source; no
+physical GPS module is connected.
 
 ## Next priorities
 
 1. Repeat the demo-route transfer on the physical board and capture the final
    commit ACK plus activated route status in the serial log.
-2. Build the safe LCD FPC carrier circuit, verify the module, assign GPIOs, and
-   run the physical all-pixels/text/map sequence.
+2. Run the full physical TFT ride sequence and capture the Start/Pause/off-route
+   states on the ILI9341 and iPhone together.
 3. Connect and verify a physical GPS module, then replace deterministic GPS
    simulation for field testing.
 
 Milestone 1—working firmware on the physical ESP32—is complete. Milestone 2a—
-physical iPhone↔ESP32 BLE discovery and connection—is complete. Physical LCD
-testing remains blocked on the carrier hardware; physical GPS testing remains
+physical iPhone↔ESP32 BLE discovery and connection—is complete. Milestone 2b—
+physical ILI9341 color TFT output—is complete. Physical GPS testing remains
 blocked on a verified GPS module and wiring.
 ## 2026-11-17 — BLE and iPhone milestone
 

@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme LastUpgradeVersion="2630" version="1.7">
   <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES">
-    <BuildActionEntries><BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="100000000000000000000020" BuildableName="BikeOS.app" BlueprintName="BikeOS" ReferencedContainer="container:BikeOS.xcodeproj"/></BuildActionEntry></BuildActionEntries>
+    <BuildActionEntries>
+      <BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="100000000000000000000020" BuildableName="BikeOS.app" BlueprintName="BikeOS" ReferencedContainer="container:BikeOS.xcodeproj"/></BuildActionEntry>
+      <BuildActionEntry buildForTesting="YES" buildForRunning="NO" buildForProfiling="NO" buildForArchiving="NO" buildForAnalyzing="YES"><BuildableReference BuildableIdentifier="2" BlueprintIdentifier="100000000000000000000021" BuildableName="BikeOSTests.xctest" BlueprintName="BikeOSTests" ReferencedContainer="container:BikeOS.xcodeproj"/></BuildActionEntry>
+    </BuildActionEntries>
   </BuildAction>
   <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES">
     <Testables><TestableReference skipped="NO"><BuildableReference BuildableIdentifier="2" BlueprintIdentifier="100000000000000000000021" BuildableName="BikeOSTests.xctest" BlueprintName="BikeOSTests" ReferencedContainer="container:BikeOS.xcodeproj"/></TestableReference></Testables>

@@ -93,6 +93,7 @@ public:
     NavigationSnapshot update(const std::optional<GpsFix>& fix,
                               bool phone_connected,
                               std::uint64_t now_monotonic_ms);
+    void set_phone_connected(bool connected);
     void mark_rerouting();
     const NavigationSnapshot& snapshot() const;
     const std::optional<Route>& route() const;

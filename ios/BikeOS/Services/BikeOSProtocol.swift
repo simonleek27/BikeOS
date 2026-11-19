@@ -1,12 +1,26 @@
+import CoreLocation
 import Foundation
 
 enum BikeOSMessageType: UInt8 {
     case statusRequest = 1, transferBegin = 2, transferChunk = 3, transferCommit = 4
     case transferCancel = 5, startNavigation = 6, cancelNavigation = 7
     case acknowledgement = 8, error = 9, status = 10, rerouteRequest = 11
+    case pauseNavigation = 12, resumeNavigation = 13, restartNavigation = 14
+    case stopNavigation = 15, triggerOffRoute = 16
 }
 
 enum BikeOSResultCode: UInt8 { case ok = 0, accepted = 1, invalidFrame = 2, unsupportedVersion = 3, busy = 4, invalidTransfer = 5, invalidOffset = 6, crcMismatch = 7, invalidBundle = 8, cancelled = 9, unauthorized = 10 }
+extension BikeOSResultCode {
+    var label: String {
+        switch self {
+        case .ok: "OK"; case .accepted: "accepted"; case .invalidFrame: "invalid frame";
+        case .unsupportedVersion: "unsupported version"; case .busy: "busy";
+        case .invalidTransfer: "invalid transfer"; case .invalidOffset: "invalid offset";
+        case .crcMismatch: "CRC mismatch"; case .invalidBundle: "invalid bundle";
+        case .cancelled: "cancelled"; case .unauthorized: "unauthorized"
+        }
+    }
+}
 enum BikeOSNavigationState: UInt8 { case noRoute = 0, waitingForGPS = 1, navigating = 2, gpsLost = 3, offRoute = 4, rerouting = 5, phoneDisconnected = 6, destinationReached = 7, error = 8 }
 enum BikeOSGpsSource: UInt8 { case none = 0, simulated = 1, uart = 2, iPhoneFallback = 3 }
 
@@ -54,6 +68,12 @@ struct BikeOSStatus {
     let headingDeg: Double?
     let speedMPS: Double?
     let matchedPointIndex: UInt16?
+
+    var gpsValid: Bool { (flags & 0x01) != 0 }
+    var coordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: Double(latitudeE7) * 1e-7,
+                               longitude: Double(longitudeE7) * 1e-7)
+    }
 
     static func decode(_ frame: BikeOSFrame) -> BikeOSStatus? {
         guard frame.type == .status || frame.type == .rerouteRequest, (frame.payload.count == 28 || frame.payload.count == 36), frame.payload[0] == 1,

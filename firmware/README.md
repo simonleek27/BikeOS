@@ -42,7 +42,7 @@ Exit the monitor with `Ctrl-]`.
 If auto-reset does not enter download mode: hold **BOOT**, tap and release
 **RST/EN**, release **BOOT**, then rerun the flash command.
 
-Expected output includes BikeOS 0.2.0, ESP32-S3 diagnostics, map/route counts,
+Expected output includes BikeOS 0.3.0, ESP32-S3 diagnostics, map/route counts,
 navigation state, progress, cross-track and maneuver distances, framebuffer
 CRCs, reroute requests, and a heartbeat.
 
@@ -83,6 +83,32 @@ idf.py -p /dev/cu.usbmodemXXXX flash monitor
 
 Once the color pattern is confirmed, turn off `CONFIG_BIKEOS_DISPLAY_TEST_PATTERN`
 in `idf.py menuconfig` to enable the BikeOS framebuffer/map output.
+
+## Indoor demo mode and navigation controls
+
+The checked-in firmware defaults to a deterministic indoor GPS simulator, so
+the complete route can be tested without a GPS antenna. After the route is
+transferred from the iPhone, the simulator waits for **Start** and then advances
+at 4.5 m/s. It emits repeatable position, heading, maneuver, off-route, and GPS
+loss states that the color TFT and iPhone display. **Restart** returns to the
+first route point.
+
+The iPhone controls map to BLE control frames: **Start**, **Pause**, **Resume**,
+**Restart**, **Stop**, and **Test off-route**. The app does not claim a route is
+active until it receives the ESP32 commit acknowledgement and a status frame
+with the matching route ID.
+
+For a physical demo:
+
+1. Flash this firmware and leave the ESP32 powered by USB.
+2. Open the BikeOS app on a real iPhone, tap **Connect**, then **Send demo route**.
+3. Tap **Start** and watch the rider marker on both the iPhone and ILI9341.
+4. Use **Pause/Resume** to stop and continue the simulator, **Restart** to reset,
+   and **Test off-route** to exercise rerouting behavior.
+
+The firmware's `sdkconfig.defaults` selects the verified ILI9341 wiring and
+disables the test pattern. Use `idf.py menuconfig` only when changing to a
+different verified display or GPS source; do not guess GPIOs.
 
 ## Hardware source selection
 

@@ -36,7 +36,7 @@ bool read_le(std::span<const std::uint8_t> input, std::size_t& offset, T& value)
 bool valid_type(const std::uint8_t value)
 {
     return value >= static_cast<std::uint8_t>(MessageType::status_request) &&
-           value <= static_cast<std::uint8_t>(MessageType::reroute_request);
+           value <= static_cast<std::uint8_t>(MessageType::trigger_off_route);
 }
 
 }  // namespace

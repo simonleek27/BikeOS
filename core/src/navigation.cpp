@@ -200,6 +200,17 @@ NavigationSnapshot NavigationEngine::update(const std::optional<GpsFix>& fix,
     return snapshot_;
 }
 
+void NavigationEngine::set_phone_connected(const bool connected)
+{
+    snapshot_.phone_connected = connected;
+    if (!connected && snapshot_.state != NavigationState::no_route &&
+        snapshot_.state != NavigationState::destination_reached && snapshot_.state != NavigationState::error) {
+        snapshot_.state = NavigationState::phone_disconnected;
+    } else if (connected && snapshot_.state == NavigationState::phone_disconnected) {
+        snapshot_.state = snapshot_.gps_valid ? NavigationState::navigating : NavigationState::waiting_for_gps;
+    }
+}
+
 void NavigationEngine::mark_rerouting()
 {
     rerouting_ = true;

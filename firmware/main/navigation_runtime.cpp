@@ -37,7 +37,7 @@ namespace bikeos {
 namespace {
 
 constexpr char kTag[] = "navigation";
-constexpr std::uint32_t kSimulatorArrivedHoldSteps = 6;  // ~6 s of "Arrived" before the demo restarts
+constexpr float kDemoSpeedMps = 4.5F;
 
 std::uint64_t uptime_ms()
 {
@@ -82,7 +82,7 @@ struct NavigationRuntime::State {
     std::int64_t utc_epoch_ms{};
     std::uint64_t utc_epoch_received_ms{};
     std::uint32_t step_count{};
-    std::uint32_t arrived_steps{};
+    bool simulation_paused{};
     bool phone_connected{};
     bool reroute_pending{};
 };
@@ -109,7 +109,7 @@ bool NavigationRuntime::initialize()
     // Keep the demo physically believable: 16.2 km/h is a normal bicycle pace.
     // The previous 18 m/s value made the moving-marker demo traverse the route
     // at motorway speed and made the LCD/phone telemetry hard to inspect.
-    state->simulator.set_speed_mps(4.5F);
+    state->simulator.set_speed_mps(kDemoSpeedMps);
     state->simulator.set_events({
         {state->route.total_distance_m * 0.42F, state->route.total_distance_m * 0.50F,
          SimulationEventType::off_route, 50.0F},
@@ -190,22 +190,14 @@ void NavigationRuntime::step(const std::uint64_t now_ms)
 {
     if (!state_) return;
     std::scoped_lock lock(state_->mutex);
+#if CONFIG_BIKEOS_GPS_SIM
+    if (state_->simulation_paused) {
+        ++state_->step_count;
+        return;
+    }
+#endif
     std::optional<GpsFix> candidate;
 #if CONFIG_BIKEOS_GPS_SIM
-    // Demo loop: hold "Arrived" on screen for a few seconds, then ride the
-    // same route again from the start.
-    if (state_->simulator.finished() &&
-        state_->navigation.snapshot().state == NavigationState::destination_reached) {
-        if (++state_->arrived_steps >= kSimulatorArrivedHoldSteps) {
-            state_->arrived_steps = 0;
-            state_->simulator.reset();
-            state_->filter.reset();  // the restart is a jump the filter would reject
-            state_->navigation.set_route(state_->route);
-            ESP_LOGI(kTag, "Simulated ride finished; restarting route %" PRIu32, state_->route.route_id);
-        }
-    } else {
-        state_->arrived_steps = 0;
-    }
     candidate = state_->simulator.step(now_ms);
 #elif CONFIG_BIKEOS_GPS_UART
     candidate = state_->uart_gps->poll(now_ms);
@@ -308,6 +300,7 @@ void NavigationRuntime::set_phone_connected(const bool connected)
     if (!state_) return;
     std::scoped_lock lock(state_->mutex);
     state_->phone_connected = connected;
+    state_->navigation.set_phone_connected(connected);
 }
 
 protocol::Status NavigationRuntime::status() const
@@ -377,12 +370,65 @@ protocol::ResultCode NavigationRuntime::install_bundle(const std::uint32_t bundl
     state_->route = std::move(candidate_route);
 #if CONFIG_BIKEOS_GPS_SIM
     if (!state_->simulator.set_route(state_->route)) return protocol::ResultCode::invalid_bundle;
-    state_->simulator.set_speed_mps(18.0F);
-    state_->simulator.set_events({});
+    state_->simulator.set_speed_mps(kDemoSpeedMps);
+    state_->simulator.set_events({
+        {state_->route.total_distance_m * 0.42F, state_->route.total_distance_m * 0.50F,
+         SimulationEventType::off_route, 50.0F},
+        {state_->route.total_distance_m * 0.68F, state_->route.total_distance_m * 0.73F,
+         SimulationEventType::gps_loss, 0.0F},
+    });
+    state_->simulation_paused = true;
 #endif
     state_->reroute_pending = false;
     ESP_LOGI(kTag, "Activated BLE bundle=%" PRIu32 " route=%" PRIu32, bundle_id, begin.route_id);
     return protocol::ResultCode::ok;
+}
+
+protocol::ResultCode NavigationRuntime::handle_navigation_command(const protocol::MessageType command)
+{
+    if (!state_) return protocol::ResultCode::invalid_bundle;
+    std::scoped_lock lock(state_->mutex);
+#if CONFIG_BIKEOS_GPS_SIM
+    switch (command) {
+        case protocol::MessageType::start_navigation:
+        case protocol::MessageType::resume_navigation:
+            if (state_->route.route_id == 0) return protocol::ResultCode::invalid_bundle;
+            state_->simulation_paused = false;
+            return protocol::ResultCode::ok;
+        case protocol::MessageType::pause_navigation:
+        case protocol::MessageType::stop_navigation:
+        case protocol::MessageType::cancel_navigation:
+            state_->simulation_paused = true;
+            return protocol::ResultCode::ok;
+        case protocol::MessageType::restart_navigation:
+            if (state_->route.route_id == 0) return protocol::ResultCode::invalid_bundle;
+            state_->simulator.set_route(state_->route);
+            state_->simulator.set_speed_mps(kDemoSpeedMps);
+            state_->simulator.set_events({
+                {state_->route.total_distance_m * 0.42F, state_->route.total_distance_m * 0.50F,
+                 SimulationEventType::off_route, 50.0F},
+                {state_->route.total_distance_m * 0.68F, state_->route.total_distance_m * 0.73F,
+                 SimulationEventType::gps_loss, 0.0F},
+            });
+            state_->filter.reset();
+            if (!state_->navigation.set_route(state_->route)) return protocol::ResultCode::invalid_bundle;
+            state_->simulation_paused = false;
+            state_->reroute_pending = false;
+            return protocol::ResultCode::ok;
+        case protocol::MessageType::trigger_off_route: {
+            if (state_->route.route_id == 0) return protocol::ResultCode::invalid_bundle;
+            const float start = state_->simulator.progress_m() + 1.0F;
+            const float end = std::min(state_->route.total_distance_m, start + 45.0F);
+            state_->simulator.set_events({{start, end, SimulationEventType::off_route, 50.0F}});
+            return protocol::ResultCode::ok;
+        }
+        default:
+            return protocol::ResultCode::invalid_frame;
+    }
+#else
+    (void)command;
+    return protocol::ResultCode::unauthorized;
+#endif
 }
 
 }  // namespace bikeos

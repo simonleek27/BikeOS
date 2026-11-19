@@ -34,6 +34,11 @@ enum class MessageType : std::uint8_t {
     error = 9,
     status = 10,
     reroute_request = 11,
+    pause_navigation = 12,
+    resume_navigation = 13,
+    restart_navigation = 14,
+    stop_navigation = 15,
+    trigger_off_route = 16,
 };
 
 enum class ResultCode : std::uint8_t {
