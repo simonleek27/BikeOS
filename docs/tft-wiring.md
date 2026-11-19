@@ -84,6 +84,15 @@ Do not connect TFT VCC to ESP32 `3V3` while J1 is open. Do not connect LED to an
 ESP32 GPIO. The LED may use the ESP32 `3V3` power header, but leave both TFT
 power wires disconnected until the ESP32 `IN-OUT` selector is verified.
 
+### If no 5V source is available
+
+The TFT can run from 3.3 V, but only after changing the TFT itself to 3.3 V
+mode: with all power disconnected, bridge the TFT `J1` pads with solder. Then
+use `TFT VCC -> ESP32 3V3` and `TFT LED -> ESP32 3V3`. Do **not** feed 3.3 V
+into `TFT VCC` while J1 remains open. If Simon does not have a soldering iron,
+the safe alternatives are an external regulated 5 V supply or enabling the
+ESP32 `IN-OUT` selector with an explicitly verified board procedure.
+
 ## 3. Wiring table — signal wiring approved, power pending 5Vin check
 
 The ESP32 signal assignments below are conservative choices from the verified
