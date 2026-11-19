@@ -68,6 +68,84 @@ std::vector<std::uint8_t> encode_frame(const FrameHeader& header, const std::spa
     return output;
 }
 
+std::vector<std::uint8_t> encode_ble_fragment(const std::uint16_t message_id,
+                                              const std::uint16_t total_size,
+                                              const std::uint16_t offset,
+                                              const std::span<const std::uint8_t> payload)
+{
+    if (total_size < frame_header_size || total_size > max_frame_size || payload.empty() ||
+        offset >= total_size || static_cast<std::size_t>(offset) + payload.size() > total_size ||
+        payload.size() > UINT16_MAX - ble_fragment_header_size) {
+        return {};
+    }
+    std::vector<std::uint8_t> output;
+    output.reserve(ble_fragment_header_size + payload.size());
+    output.push_back(ble_fragment_magic);
+    output.push_back(ble_fragment_version);
+    append_le(output, message_id);
+    append_le(output, total_size);
+    append_le(output, offset);
+    output.insert(output.end(), payload.begin(), payload.end());
+    return output;
+}
+
+bool decode_ble_fragment(const std::span<const std::uint8_t> encoded,
+                         BleFragmentHeader& header,
+                         std::span<const std::uint8_t>& payload)
+{
+    if (encoded.size() < ble_fragment_header_size || encoded[0] != ble_fragment_magic ||
+        encoded[1] != ble_fragment_version) {
+        return false;
+    }
+    std::size_t offset = 2;
+    if (!read_le(encoded, offset, header.message_id) || !read_le(encoded, offset, header.total_size) ||
+        !read_le(encoded, offset, header.offset) || header.total_size < frame_header_size ||
+        header.total_size > max_frame_size || header.offset >= header.total_size || offset >= encoded.size() ||
+        static_cast<std::size_t>(header.offset) + (encoded.size() - offset) > header.total_size) {
+        return false;
+    }
+    payload = encoded.subspan(offset);
+    return true;
+}
+
+BleFragmentResult BleFragmentReassembler::append(const std::span<const std::uint8_t> fragment,
+                                                 std::vector<std::uint8_t>& complete_frame)
+{
+    complete_frame.clear();
+    BleFragmentHeader header;
+    std::span<const std::uint8_t> payload;
+    if (!decode_ble_fragment(fragment, header, payload)) {
+        reset();
+        return BleFragmentResult::invalid;
+    }
+    if (!active_) {
+        if (header.offset != 0) return BleFragmentResult::invalid;
+        active_ = true;
+        message_id_ = header.message_id;
+        total_size_ = header.total_size;
+        bytes_.clear();
+        bytes_.reserve(total_size_);
+    }
+    if (header.message_id != message_id_ || header.total_size != total_size_ ||
+        header.offset != bytes_.size()) {
+        reset();
+        return BleFragmentResult::invalid;
+    }
+    bytes_.insert(bytes_.end(), payload.begin(), payload.end());
+    if (bytes_.size() < total_size_) return BleFragmentResult::incomplete;
+    complete_frame = std::move(bytes_);
+    reset();
+    return BleFragmentResult::complete;
+}
+
+void BleFragmentReassembler::reset()
+{
+    active_ = false;
+    message_id_ = 0;
+    total_size_ = 0;
+    bytes_.clear();
+}
+
 bool decode_frame(const std::span<const std::uint8_t> encoded, DecodedFrame& output)
 {
     if (encoded.size() < frame_header_size || encoded[0] != magic[0] || encoded[1] != magic[1] ||

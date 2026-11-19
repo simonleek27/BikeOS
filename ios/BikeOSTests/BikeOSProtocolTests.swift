@@ -44,4 +44,26 @@ final class BikeOSProtocolTests: XCTestCase {
         let ack = BikeOSAcknowledgement.decode(BikeOSFrame(type: .acknowledgement, transferID: 8, sequence: 1, flags: 0, payload: ackPayload))
         XCTAssertEqual(ack?.result, .accepted); XCTAssertEqual(ack?.nextOffset, 150); XCTAssertEqual(ack?.bundleID, 99)
     }
+
+    func testBLEFragmentEnvelopeAtLowAndHighATTLimits() {
+        let frame = BikeOSFrame(type: .transferChunk,
+                                transferID: 17,
+                                sequence: 4,
+                                flags: 0,
+                                payload: Data(repeating: 0xA5, count: 180)).encoded()
+        for limit in [20, 23, 244, 247] {
+            if frame.count <= limit { continue }
+            let fragments = BikeOSBLEFragment.makeFragments(frame: frame, messageID: 9, maxWriteLength: limit)
+            XCTAssertNotNil(fragments)
+            XCTAssertTrue(fragments!.allSatisfy { $0.count <= limit })
+            XCTAssertEqual(fragments!.first?[0], BikeOSBLEFragment.magic)
+            var joined = Data()
+            for fragment in fragments! {
+                XCTAssertEqual(fragment[1], BikeOSBLEFragment.version)
+                joined.append(fragment.dropFirst(BikeOSBLEFragment.headerSize))
+            }
+            XCTAssertEqual(joined, frame)
+            XCTAssertNotNil(BikeOSFrame.decode(joined))
+        }
+    }
 }

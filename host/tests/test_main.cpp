@@ -354,6 +354,44 @@ void test_ble_protocol()
     CHECK(decoded.header.type == MessageType::trigger_off_route);
 }
 
+void test_ble_fragment_transport()
+{
+    using namespace bikeos::protocol;
+    const std::vector<std::uint8_t> payload(180, 0xA5);
+    const auto frame = encode_frame({.type = MessageType::transfer_chunk, .transfer_id = 17, .sequence = 4},
+                                    encode_transfer_chunk(0, payload));
+    CHECK(frame.size() > 20);
+
+    for (const std::size_t write_limit : {std::size_t{20}, std::size_t{23}, std::size_t{244}, std::size_t{247}}) {
+        BleFragmentReassembler reassembler;
+        std::vector<std::uint8_t> reconstructed;
+        std::vector<std::uint8_t> final_frame;
+        std::size_t offset = 0;
+        std::uint16_t message_id = static_cast<std::uint16_t>(write_limit);
+        while (offset < frame.size()) {
+            const std::size_t count = std::min(write_limit - ble_fragment_header_size, frame.size() - offset);
+            const auto fragment = encode_ble_fragment(message_id,
+                                                      static_cast<std::uint16_t>(frame.size()),
+                                                      static_cast<std::uint16_t>(offset),
+                                                      std::span<const std::uint8_t>(frame).subspan(offset, count));
+            CHECK(!fragment.empty());
+            const auto result = reassembler.append(fragment, reconstructed);
+            if (offset + count < frame.size()) CHECK(result == BleFragmentResult::incomplete);
+            offset += count;
+        }
+        CHECK(reconstructed == frame);
+        DecodedFrame decoded;
+        CHECK(decode_frame(reconstructed, decoded));
+
+        const auto bad_order = encode_ble_fragment(message_id + 1,
+                                                   static_cast<std::uint16_t>(frame.size()),
+                                                   1,
+                                                   std::span<const std::uint8_t>(frame).subspan(1, 1));
+        CHECK(!bad_order.empty());
+        CHECK(reassembler.append(bad_order, final_frame) == BleFragmentResult::invalid);
+    }
+}
+
 
 void test_map_areas_codec()
 {
@@ -532,6 +570,7 @@ int main()
     test_simulated_ride();
     test_amsterdam_assets();
     test_ble_protocol();
+    test_ble_fragment_transport();
     test_map_areas_codec();
     test_canvas_and_fonts();
     test_time_and_theme();

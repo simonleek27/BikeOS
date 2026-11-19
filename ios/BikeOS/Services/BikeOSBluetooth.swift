@@ -3,11 +3,69 @@ import CoreLocation
 import Combine
 import Foundation
 
+enum BikeOSConnectionState: Equatable {
+    case bluetoothOff
+    case readyToScan
+    case scanning
+    case connecting
+    case connected
+    case readyForTransfer
+    case disconnected
+    case failed
+
+    var label: String {
+        switch self {
+        case .bluetoothOff: "Bluetooth unavailable"
+        case .readyToScan: "Ready — tap Connect"
+        case .scanning: "Scanning…"
+        case .connecting: "Connecting…"
+        case .connected: "Connected"
+        case .readyForTransfer: "Ready"
+        case .disconnected: "Disconnected"
+        case .failed: "Connection failed"
+        }
+    }
+}
+
+struct BikeOSWritePlan {
+    let mode: CBCharacteristicWriteType
+    let limit: Int
+    let responseLimit: Int
+    let noResponseLimit: Int
+    let fragmented: Bool
+}
+
+enum BikeOSBLEFragment {
+    static let magic: UInt8 = 0xF7
+    static let version: UInt8 = 1
+    static let headerSize = 8
+
+    static func makeFragments(frame: Data, messageID: UInt16, maxWriteLength: Int) -> [Data]? {
+        guard frame.count >= BikeOSFrame.headerSize, frame.count <= UInt16.max,
+              maxWriteLength > headerSize else { return nil }
+        let payloadCapacity = maxWriteLength - headerSize
+        var fragments: [Data] = []
+        var offset = 0
+        while offset < frame.count {
+            let end = min(offset + payloadCapacity, frame.count)
+            var fragment = Data([magic, version])
+            fragment.appendLE(messageID)
+            fragment.appendLE(UInt16(frame.count))
+            fragment.appendLE(UInt16(offset))
+            fragment.append(frame[offset..<end])
+            fragments.append(fragment)
+            offset = end
+        }
+        return fragments
+    }
+}
+
 @MainActor final class BikeOSBluetooth: NSObject, ObservableObject {
-    @Published private(set) var connection = "Disconnected"
+    @Published private(set) var connectionState: BikeOSConnectionState = .disconnected
     @Published private(set) var status: BikeOSStatus?
     @Published private(set) var lastAck = "No transfer yet"
     @Published private(set) var deviceName = "BikeOS"
+    @Published private(set) var firmwareInfo = ""
     @Published private(set) var transferProgress: Double?
     @Published private(set) var liveCoordinate: CLLocationCoordinate2D?
     @Published private(set) var liveHeading: Double?
@@ -28,20 +86,34 @@ import Foundation
     private var pendingCommands: [UInt32: String] = [:]
     private var interpolationTask: Task<Void, Never>?
     private var transferTimeoutTask: Task<Void, Never>?
+    private var ackNotifyReady = false
+    private var statusNotifyReady = false
+    private var fragmentMessageID: UInt16 = 1
+    private struct PendingWrite {
+        let bytes: Data
+        let characteristic: CBCharacteristic
+        let peripheral: CBPeripheral
+        let type: CBCharacteristicWriteType
+    }
+    private var writeQueue: [PendingWrite] = []
+    private var responseWriteInFlight = false
 
     override init() {
         super.init()
         central = CBCentralManager(delegate: self, queue: nil)
     }
 
-    var isConnected: Bool { connection == "Connected" && control != nil }
+    var connection: String { connectionState.label }
+    var isBluetoothConnected: Bool { peripheral?.state == .connected }
+    var isReadyForTransfer: Bool { connectionState == .readyForTransfer }
+    var isConnected: Bool { isReadyForTransfer }
 
     func connect() {
         guard central.state == .poweredOn else {
-            connection = "Bluetooth unavailable"
+            connectionState = .bluetoothOff
             return
         }
-        connection = "Scanning…"
+        connectionState = .scanning
         central.scanForPeripherals(withServices: [CBUUID(string: BikeOSUUID.service)],
                                    options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
     }
@@ -55,8 +127,8 @@ import Foundation
     }
 
     func sendDemoRoute() {
-        guard control != nil, data != nil, peripheral != nil else {
-            lastAck = "Connect to BikeOS first"
+        guard isReadyForTransfer else {
+            lastAck = "Connect to BikeOS and wait until it is Ready"
             return
         }
         guard let mapURL = Bundle.main.url(forResource: "amsterdam_demo", withExtension: "bmap"),
@@ -100,8 +172,8 @@ import Foundation
     func triggerOffRoute() { sendDemoCommand(.triggerOffRoute, label: "Off-route test requested") }
 
     private func sendDemoCommand(_ type: BikeOSMessageType, label: String) {
-        guard control != nil else {
-            lastAck = "Connect to BikeOS first"
+        guard isReadyForTransfer else {
+            lastAck = "Connect to BikeOS and wait until it is Ready"
             return
         }
         sendControl(type: type, payload: Data(), label: label)
@@ -109,18 +181,9 @@ import Foundation
 
     private func sendNextChunk() {
         guard phase == .sending, let peripheral, let data, nextOffset < transferBytes.count else { return }
-        // Keep the complete frame within CoreBluetooth's negotiated write size
-        // and the protocol's 480-byte payload limit. With-response writes give
-        // transport-level flow control; the ESP32 ACK gives offset-level flow
-        // control and validation.
-        let maxFrame = min(500, max(peripheral.maximumWriteValueLength(for: .withResponse),
-                                  peripheral.maximumWriteValueLength(for: .withoutResponse)))
-        let capacity = min(476, maxFrame - BikeOSFrame.headerSize - MemoryLayout<UInt32>.size)
-        guard capacity > 0 else {
-            phase = .failed
-            lastAck = "Bluetooth write size is too small"
-            return
-        }
+        // Keep the protocol frame at its full 480-byte payload capacity. The
+        // write layer fragments it when the negotiated ATT limit is smaller.
+        let capacity = 476
         let end = min(nextOffset + capacity, transferBytes.count)
         var chunk = Data()
         chunk.appendLE(UInt32(nextOffset))
@@ -171,26 +234,89 @@ import Foundation
         return frameSequence
     }
 
-    /// CoreBluetooth can expose a smaller write-with-response size than the
-    /// negotiated ATT MTU. The ESP32 control characteristic accepts both write
-    /// modes, so use the response path when it fits and fall back to a
-    /// no-response write for larger protocol frames. Application-level ACKs
-    /// still gate every transfer step.
     private func write(_ frame: Data, to characteristic: CBCharacteristic, on peripheral: CBPeripheral) -> Bool {
         let responseLimit = peripheral.maximumWriteValueLength(for: .withResponse)
         if frame.count <= responseLimit, characteristic.properties.contains(.write) {
-            peripheral.writeValue(frame, for: characteristic, type: .withResponse)
+            enqueue([PendingWrite(bytes: frame, characteristic: characteristic, peripheral: peripheral, type: .withResponse)])
             return true
         }
         let noResponseLimit = peripheral.maximumWriteValueLength(for: .withoutResponse)
         if frame.count <= noResponseLimit, characteristic.properties.contains(.writeWithoutResponse) {
-            peripheral.writeValue(frame, for: characteristic, type: .withoutResponse)
+            enqueue([PendingWrite(bytes: frame, characteristic: characteristic, peripheral: peripheral, type: .withoutResponse)])
             return true
         }
-        lastAck = "BLE write limit is \(responseLimit) bytes; disconnect/reconnect and try again"
+
+        let mode: CBCharacteristicWriteType
+        let limit: Int
+        if characteristic.properties.contains(.write), responseLimit > BikeOSBLEFragment.headerSize {
+            mode = .withResponse
+            limit = responseLimit
+        } else if characteristic.properties.contains(.writeWithoutResponse), noResponseLimit > BikeOSBLEFragment.headerSize {
+            mode = .withoutResponse
+            limit = noResponseLimit
+        } else {
+            failWrite(frame: frame,
+                      responseLimit: responseLimit,
+                      noResponseLimit: noResponseLimit,
+                      properties: characteristic.properties)
+            return false
+        }
+        guard let fragments = BikeOSBLEFragment.makeFragments(frame: frame,
+                                                               messageID: nextFragmentMessageID(),
+                                                               maxWriteLength: limit) else {
+            failWrite(frame: frame,
+                      responseLimit: responseLimit,
+                      noResponseLimit: noResponseLimit,
+                      properties: characteristic.properties)
+            return false
+        }
+        enqueue(fragments.map { PendingWrite(bytes: $0, characteristic: characteristic, peripheral: peripheral, type: mode) })
+        return true
+    }
+
+    private func nextFragmentMessageID() -> UInt16 {
+        defer { fragmentMessageID &+= 1 }
+        return fragmentMessageID
+    }
+
+    private func enqueue(_ writes: [PendingWrite]) {
+        writeQueue.append(contentsOf: writes)
+        pumpWrites()
+    }
+
+    private func pumpWrites() {
+        while !writeQueue.isEmpty {
+            let next = writeQueue[0]
+            if next.type == .withResponse {
+                guard !responseWriteInFlight else { return }
+                responseWriteInFlight = true
+                writeQueue.removeFirst()
+                next.peripheral.writeValue(next.bytes, for: next.characteristic, type: next.type)
+                return
+            }
+            guard next.peripheral.canSendWriteWithoutResponse else { return }
+            writeQueue.removeFirst()
+            next.peripheral.writeValue(next.bytes, for: next.characteristic, type: next.type)
+        }
+    }
+
+    private func failWrite(frame: Data,
+                           responseLimit: Int,
+                           noResponseLimit: Int,
+                           properties: CBCharacteristicProperties) {
+        writeQueue.removeAll()
+        responseWriteInFlight = false
         phase = .failed
+        lastAck = "BLE frame \(frame.count) B exceeds write limits (response \(responseLimit), no-response \(noResponseLimit)); properties=\(propertiesDescription(properties)); firmware=\(firmwareInfo.isEmpty ? "unknown" : firmwareInfo)"
         clearTransferTimeout()
-        return false
+    }
+
+    private func propertiesDescription(_ properties: CBCharacteristicProperties) -> String {
+        var names: [String] = []
+        if properties.contains(.write) { names.append("write") }
+        if properties.contains(.writeWithoutResponse) { names.append("writeWithoutResponse") }
+        if properties.contains(.notify) { names.append("notify") }
+        return names.isEmpty ? "none" : names.joined(separator: ",")
     }
 
     private func armTransferTimeout() {
@@ -207,6 +333,19 @@ import Foundation
     private func clearTransferTimeout() {
         transferTimeoutTask?.cancel()
         transferTimeoutTask = nil
+    }
+
+    private func updateTransferReadiness() {
+        guard isBluetoothConnected, control != nil, data != nil else {
+            if isBluetoothConnected { connectionState = .connected }
+            return
+        }
+        guard ackNotifyReady, statusNotifyReady else {
+            connectionState = .connected
+            return
+        }
+        connectionState = .readyForTransfer
+        requestStatus()
     }
 
     private func nextSequence() -> UInt32 {
@@ -282,7 +421,7 @@ import Foundation
 extension BikeOSBluetooth: CBCentralManagerDelegate {
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
         Task { @MainActor in
-            self.connection = central.state == .poweredOn ? "Ready — tap Connect" : "Bluetooth unavailable"
+            self.connectionState = central.state == .poweredOn ? .readyToScan : .bluetoothOff
         }
     }
 
@@ -293,7 +432,7 @@ extension BikeOSBluetooth: CBCentralManagerDelegate {
         Task { @MainActor in
             self.peripheral = peripheral
             self.deviceName = peripheral.name ?? "BikeOS"
-            self.connection = "Connecting…"
+            self.connectionState = .connecting
             central.stopScan()
             peripheral.delegate = self
             central.connect(peripheral)
@@ -302,7 +441,11 @@ extension BikeOSBluetooth: CBCentralManagerDelegate {
 
     nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         Task { @MainActor in
-            self.connection = "Connected"
+            self.control = nil
+            self.data = nil
+            self.ackNotifyReady = false
+            self.statusNotifyReady = false
+            self.connectionState = .connected
             peripheral.discoverServices([CBUUID(string: BikeOSUUID.service)])
         }
     }
@@ -311,11 +454,17 @@ extension BikeOSBluetooth: CBCentralManagerDelegate {
                                    didDisconnectPeripheral peripheral: CBPeripheral,
                                    error: Error?) {
         Task { @MainActor in
-            self.connection = "Disconnected"
+            self.connectionState = .disconnected
             self.status = nil
             self.liveCoordinate = nil
             self.liveHeading = nil
+            self.control = nil
+            self.data = nil
+            self.ackNotifyReady = false
+            self.statusNotifyReady = false
             self.pendingCommands.removeAll()
+            self.writeQueue.removeAll()
+            self.responseWriteInFlight = false
             self.phase = .idle
             self.clearTransferTimeout()
         }
@@ -324,6 +473,10 @@ extension BikeOSBluetooth: CBCentralManagerDelegate {
 
 extension BikeOSBluetooth: CBPeripheralDelegate {
     nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        if error != nil {
+            Task { @MainActor in self.connectionState = .failed }
+            return
+        }
         guard let service = peripheral.services?.first(where: { $0.uuid == CBUUID(string: BikeOSUUID.service) }) else { return }
         peripheral.discoverCharacteristics(nil, for: service)
     }
@@ -331,25 +484,58 @@ extension BikeOSBluetooth: CBPeripheralDelegate {
     nonisolated func peripheral(_ peripheral: CBPeripheral,
                                 didDiscoverCharacteristicsFor service: CBService,
                                 error: Error?) {
+        if error != nil {
+            Task { @MainActor in self.connectionState = .failed }
+            return
+        }
         Task { @MainActor in
             for characteristic in service.characteristics ?? [] {
                 switch characteristic.uuid.uuidString.uppercased() {
-                case BikeOSUUID.control: control = characteristic
-                case BikeOSUUID.data: data = characteristic
-                case BikeOSUUID.acknowledgement: peripheral.setNotifyValue(true, for: characteristic)
-                case BikeOSUUID.status: peripheral.setNotifyValue(true, for: characteristic)
+                case BikeOSUUID.deviceInfo:
+                    peripheral.readValue(for: characteristic)
+                case BikeOSUUID.control:
+                    control = characteristic
+                case BikeOSUUID.data:
+                    data = characteristic
+                case BikeOSUUID.acknowledgement:
+                    peripheral.setNotifyValue(true, for: characteristic)
+                case BikeOSUUID.status:
+                    peripheral.setNotifyValue(true, for: characteristic)
                 default: break
                 }
             }
-            requestStatus()
+            updateTransferReadiness()
+        }
+    }
+
+    nonisolated func peripheral(_ peripheral: CBPeripheral,
+                                didUpdateNotificationStateFor characteristic: CBCharacteristic,
+                                error: Error?) {
+        Task { @MainActor in
+            if error != nil {
+                self.connectionState = .failed
+                self.lastAck = "Bluetooth notification setup failed"
+                return
+            }
+            switch characteristic.uuid.uuidString.uppercased() {
+            case BikeOSUUID.acknowledgement: self.ackNotifyReady = characteristic.isNotifying
+            case BikeOSUUID.status: self.statusNotifyReady = characteristic.isNotifying
+            default: break
+            }
+            self.updateTransferReadiness()
         }
     }
 
     nonisolated func peripheral(_ peripheral: CBPeripheral,
                                 didUpdateValueFor characteristic: CBCharacteristic,
                                 error: Error?) {
-        guard error == nil, let value = characteristic.value, let frame = BikeOSFrame.decode(value) else { return }
+        guard error == nil, let value = characteristic.value else { return }
         Task { @MainActor in
+            if characteristic.uuid.uuidString.uppercased() == BikeOSUUID.deviceInfo {
+                self.firmwareInfo = String(data: value, encoding: .utf8) ?? "Unknown firmware"
+                return
+            }
+            guard let frame = BikeOSFrame.decode(value) else { return }
             if frame.type == .acknowledgement {
                 handleAcknowledgement(frame)
             } else if let decoded = BikeOSStatus.decode(frame) {
@@ -367,11 +553,16 @@ extension BikeOSBluetooth: CBPeripheralDelegate {
     nonisolated func peripheral(_ peripheral: CBPeripheral,
                                 didWriteValueFor characteristic: CBCharacteristic,
                                 error: Error?) {
-        if let error {
-            Task { @MainActor in
+        Task { @MainActor in
+            self.responseWriteInFlight = false
+            if let error {
                 phase = .failed
                 lastAck = "Bluetooth write failed: \(error.localizedDescription)"
+                self.writeQueue.removeAll()
+                self.clearTransferTimeout()
+                return
             }
+            self.pumpWrites()
         }
     }
 }

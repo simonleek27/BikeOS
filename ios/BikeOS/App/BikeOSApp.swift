@@ -67,7 +67,10 @@ struct BikeOSHomeView: View {
                 Text("•")
                 Label("\(route.durationMin) min", systemImage: "clock")
                 Spacer()
-                Button("Preview") { showingNavigation = true }.buttonStyle(.borderedProminent)
+                Button("Preview") { showingNavigation = true }
+                    .buttonStyle(.borderedProminent)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
             }
             if let first = route.maneuvers.first {
                 Label("First turn: \(first.type.label)\(first.streetName.isEmpty ? "" : " on \(first.streetName)")",
@@ -82,19 +85,24 @@ struct BikeOSHomeView: View {
 
     private var deviceCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Circle()
-                    .fill(bluetooth.connection == "Connected" ? .green : .orange)
-                    .frame(width: 10, height: 10)
-                Text(bluetooth.deviceName).font(.headline)
-                Spacer()
-                Text(bluetooth.connection).font(.subheadline).foregroundStyle(.secondary)
+            ConnectionStatusView(state: bluetooth.connectionState,
+                                 deviceName: bluetooth.deviceName,
+                                 firmwareInfo: bluetooth.firmwareInfo)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                Button("Connect", systemImage: "dot.radiowaves.left.and.right") { bluetooth.connect() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(bluetooth.isBluetoothConnected)
+                Button("Disconnect", systemImage: "xmark.circle") { bluetooth.disconnect() }
+                    .buttonStyle(.bordered)
+                    .disabled(!bluetooth.isBluetoothConnected)
+                Button("Send demo route", systemImage: "arrow.up.circle") { bluetooth.sendDemoRoute() }
+                    .buttonStyle(.bordered)
+                    .disabled(!bluetooth.isReadyForTransfer)
+                    .gridCellColumns(2)
             }
-            HStack {
-                Button("Connect") { bluetooth.connect() }.buttonStyle(.borderedProminent)
-                Button("Send demo route") { bluetooth.sendDemoRoute() }.buttonStyle(.bordered)
-                Button("Disconnect") { bluetooth.disconnect() }.buttonStyle(.bordered)
-            }
+            .frame(maxWidth: .infinity)
+            .controlSize(.large)
+            .contentShape(Rectangle())
             if let progress = bluetooth.transferProgress, progress < 1 {
                 ProgressView(value: progress)
             }
@@ -107,6 +115,43 @@ struct BikeOSHomeView: View {
         .padding()
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 18))
+    }
+}
+
+private struct ConnectionStatusView: View {
+    let state: BikeOSConnectionState
+    let deviceName: String
+    let firmwareInfo: String
+
+    private var indicatorColor: Color {
+        switch state {
+        case .connected, .readyForTransfer: .green
+        case .scanning, .connecting, .readyToScan: .orange
+        case .failed: .red
+        case .bluetoothOff, .disconnected: .gray
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(indicatorColor)
+                .frame(width: 12, height: 12)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(deviceName).font(.headline)
+                Text(state.label).font(.subheadline).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if state == .readyForTransfer {
+                Label("Ready", systemImage: "checkmark.circle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.green)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(firmwareInfo.isEmpty ? state.label : "\(state.label). \(firmwareInfo)")
     }
 }
 
@@ -170,37 +215,30 @@ private struct ActiveNavigationView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
-            Map(position: $cameraPosition, interactionModes: [.pan, .zoom, .rotate]) {
-                MapPolyline(coordinates: route.points).stroke(.blue, lineWidth: 5)
-                Marker("Start", coordinate: route.points[0]).tint(.green)
-                Marker("Destination", coordinate: route.points.last!).tint(.red)
-                if let coordinate = bluetooth.liveCoordinate {
-                    Annotation("You", coordinate: coordinate, anchor: .center) {
-                        Image(systemName: "location.north.fill")
-                            .font(.title2)
-                            .foregroundStyle(.orange)
-                            .rotationEffect(.degrees(bluetooth.liveHeading ?? 0))
-                            .padding(8)
-                            .background(.white)
-                            .clipShape(Circle())
-                            .shadow(radius: 3)
-                    }
+        Map(position: $cameraPosition, interactionModes: [.pan, .zoom, .rotate]) {
+            MapPolyline(coordinates: route.points).stroke(.blue, lineWidth: 5)
+            Marker("Start", coordinate: route.points[0]).tint(.green)
+            Marker("Destination", coordinate: route.points.last!).tint(.red)
+            if let coordinate = bluetooth.liveCoordinate {
+                Annotation("You", coordinate: coordinate, anchor: .center) {
+                    Image(systemName: "location.north.fill")
+                        .font(.title2)
+                        .foregroundStyle(.orange)
+                        .rotationEffect(.degrees(bluetooth.liveHeading ?? 0))
+                        .padding(8)
+                        .background(.white)
+                        .clipShape(Circle())
+                        .shadow(radius: 3)
                 }
             }
-            .ignoresSafeArea(edges: .top)
-            .onMapCameraChange(frequency: .onEnd) { _ in
-                if !suppressCameraChange { followsRider = false }
-            }
-            .onChange(of: bluetooth.liveCoordinate?.latitude) { _, _ in followRiderIfNeeded() }
-            .onChange(of: bluetooth.liveHeading) { _, _ in followRiderIfNeeded() }
-
-            VStack(spacing: 0) {
-                topStatusBar
-                Spacer()
-                informationCard
-            }
         }
+        .safeAreaInset(edge: .top, spacing: 0) { topStatusBar }
+        .safeAreaInset(edge: .bottom, spacing: 0) { informationCard }
+        .onMapCameraChange(frequency: .onEnd) { _ in
+            if !suppressCameraChange { followsRider = false }
+        }
+        .onChange(of: bluetooth.liveCoordinate?.latitude) { _, _ in followRiderIfNeeded() }
+        .onChange(of: bluetooth.liveHeading) { _, _ in followRiderIfNeeded() }
         .navigationTitle(route.name)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { fitRoute() }
@@ -220,15 +258,23 @@ private struct ActiveNavigationView: View {
                 .padding(.vertical, 7)
                 .background(.regularMaterial, in: Capsule())
             Spacer()
+            ConnectionStatusView(state: bluetooth.connectionState,
+                                 deviceName: bluetooth.deviceName,
+                                 firmwareInfo: bluetooth.firmwareInfo)
+                .frame(maxWidth: 150)
             Button { recenter() } label: {
                 Image(systemName: "location.fill")
-                    .frame(width: 34, height: 34)
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.borderedProminent)
             .accessibilityLabel("Recenter on rider")
         }
         .padding(.horizontal)
+        .frame(maxWidth: .infinity)
         .padding(.top, 8)
+        .padding(.bottom, 8)
+        .background(.regularMaterial)
+        .contentShape(Rectangle())
     }
 
     private var informationCard: some View {
@@ -268,11 +314,17 @@ private struct ActiveNavigationView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+                .disabled(!bluetooth.isReadyForTransfer)
 
                 Menu {
                     Button("Send route", systemImage: "arrow.up.circle") { bluetooth.sendDemoRoute() }
+                        .disabled(!bluetooth.isReadyForTransfer)
                     Button("Restart from beginning", systemImage: "backward.end") { bluetooth.restartNavigation() }
+                        .disabled(!bluetooth.isReadyForTransfer)
                     Button("Test off-route", systemImage: "exclamationmark.triangle") { bluetooth.triggerOffRoute() }
+                        .disabled(!bluetooth.isReadyForTransfer)
                     Divider()
                     Button("Route overview", systemImage: "map") { fitRoute() }
                     Button("Heading-up map", systemImage: "location.north") {
@@ -289,6 +341,8 @@ private struct ActiveNavigationView: View {
                         .frame(width: 46, height: 44)
                 }
                 .buttonStyle(.bordered)
+                .frame(minWidth: 48, minHeight: 44)
+                .contentShape(Rectangle())
             }
             Text(bluetooth.lastAck).font(.caption).foregroundStyle(.secondary)
         }
@@ -296,6 +350,8 @@ private struct ActiveNavigationView: View {
         .padding(.top, 16)
         .padding(.bottom, 12)
         .background(.regularMaterial)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     private func metric(_ title: String, value: String) -> some View {

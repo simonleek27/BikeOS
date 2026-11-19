@@ -32,7 +32,7 @@
 		100000000000000000000070 /* App/BikeOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/BikeOSApp.swift; sourceTree = "<group>"; };
 		100000000000000000000071 /* Services/BikeOSProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/BikeOSProtocol.swift; sourceTree = "<group>"; };
 		100000000000000000000072 /* Services/BikeOSBluetooth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/BikeOSBluetooth.swift; sourceTree = "<group>"; };
-		100000000000000000000073 /* BikeOSTests/BikeOSProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BikeOSTests/BikeOSProtocolTests.swift; sourceTree = "<group>"; };
+		100000000000000000000073 /* BikeOSTests/BikeOSProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BikeOSProtocolTests.swift; sourceTree = "<group>"; };
 		100000000000000000000074 /* BikeOS/Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = BikeOS/Info.plist; sourceTree = "<group>"; };
 		100000000000000000000075 /* amsterdam_demo.bmap */ = {isa = PBXFileReference; lastKnownFileType = archive; name = amsterdam_demo.bmap; path = ../data/amsterdam_demo.bmap; sourceTree = "<group>"; };
 		100000000000000000000076 /* amsterdam_demo.brte */ = {isa = PBXFileReference; lastKnownFileType = archive; name = amsterdam_demo.brte; path = ../data/amsterdam_demo.brte; sourceTree = "<group>"; };
@@ -246,6 +246,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				DEVELOPMENT_TEAM = Z5M225BAWF;
+				ENABLE_TESTABILITY = YES;
 				INFOPLIST_FILE = BikeOS/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bikeos.app;

@@ -13,6 +13,13 @@ constexpr std::size_t frame_header_size = 20;
 constexpr std::size_t max_frame_payload = 480;
 constexpr std::size_t max_bundle_size = 512 * 1024;
 
+// BLE ATT writes can be as small as 20 bytes. Frames remain unchanged on the
+// wire when they fit, but larger frames use this transport-only envelope.
+constexpr std::uint8_t ble_fragment_magic = 0xF7;
+constexpr std::uint8_t ble_fragment_version = 1;
+constexpr std::size_t ble_fragment_header_size = 8;
+constexpr std::size_t max_frame_size = frame_header_size + max_frame_payload;
+
 // Stable UUIDs. The service UUID is also included in the advertising payload.
 inline constexpr char service_uuid[] = "A9D30000-9C9A-4F10-9B53-42494B454F53";
 inline constexpr char device_info_uuid[] = "A9D30001-9C9A-4F10-9B53-42494B454F53";
@@ -108,6 +115,27 @@ struct Acknowledgement {
     std::uint32_t bundle_id{};
 };
 
+struct BleFragmentHeader {
+    std::uint16_t message_id{};
+    std::uint16_t total_size{};
+    std::uint16_t offset{};
+};
+
+enum class BleFragmentResult : std::uint8_t { invalid, incomplete, complete };
+
+class BleFragmentReassembler {
+public:
+    BleFragmentResult append(std::span<const std::uint8_t> fragment,
+                             std::vector<std::uint8_t>& complete_frame);
+    void reset();
+
+private:
+    bool active_{};
+    std::uint16_t message_id_{};
+    std::uint16_t total_size_{};
+    std::vector<std::uint8_t> bytes_;
+};
+
 struct Status {
     std::uint8_t protocol_version{version};
     NavigationState navigation_state{NavigationState::no_route};
@@ -130,6 +158,14 @@ struct Status {
 std::uint32_t crc32(std::span<const std::uint8_t> data);
 std::vector<std::uint8_t> encode_frame(const FrameHeader& header, std::span<const std::uint8_t> payload);
 bool decode_frame(std::span<const std::uint8_t> encoded, DecodedFrame& output);
+
+std::vector<std::uint8_t> encode_ble_fragment(std::uint16_t message_id,
+                                              std::uint16_t total_size,
+                                              std::uint16_t offset,
+                                              std::span<const std::uint8_t> payload);
+bool decode_ble_fragment(std::span<const std::uint8_t> encoded,
+                         BleFragmentHeader& header,
+                         std::span<const std::uint8_t>& payload);
 
 std::vector<std::uint8_t> encode_transfer_begin(const TransferBegin& begin);
 bool decode_transfer_begin(std::span<const std::uint8_t> payload, TransferBegin& output);

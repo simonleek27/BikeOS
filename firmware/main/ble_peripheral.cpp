@@ -52,6 +52,8 @@ std::uint16_t g_event_handle = 0;
 bool g_status_notify = false;
 bool g_ack_notify = false;
 bool g_event_notify = false;
+protocol::BleFragmentReassembler g_control_reassembler;
+protocol::BleFragmentReassembler g_data_reassembler;
 
 struct TransferState {
     bool active{};
@@ -87,6 +89,20 @@ bool flatten(const struct os_mbuf* om, std::vector<std::uint8_t>& output)
     return ble_hs_mbuf_to_flat(om, output.data(), output.size(), nullptr) == 0;
 }
 
+bool decode_transport_frame(const std::span<const std::uint8_t> write,
+                            protocol::BleFragmentReassembler& reassembler,
+                            std::vector<std::uint8_t>& frame_bytes)
+{
+    if (write.empty()) return false;
+    if (write.front() != protocol::ble_fragment_magic) {
+        reassembler.reset();
+        frame_bytes.assign(write.begin(), write.end());
+        return frame_bytes.size() <= protocol::max_frame_size;
+    }
+    const auto result = reassembler.append(write, frame_bytes);
+    return result != protocol::BleFragmentResult::invalid;
+}
+
 void send_ack(const std::uint32_t transfer_id,
               const std::uint32_t sequence,
               const protocol::Acknowledgement& acknowledgement)
@@ -109,7 +125,7 @@ int access_device_info(uint16_t, uint16_t, ble_gatt_access_ctxt* ctxt, void*)
 {
     if (ctxt->op != BLE_GATT_ACCESS_OP_READ_CHR) return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
     constexpr char info[] =
-        "BikeOS firmware=0.3.0 protocol=1 capabilities=sim-gps,bmap-v4,brte-v1,nav-controls";
+        "BikeOS firmware=0.4.0 protocol=1 capabilities=sim-gps,bmap-v4,brte-v1,nav-controls,ble-fragments";
     return os_mbuf_append(ctxt->om, info, sizeof(info) - 1) == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 
@@ -125,8 +141,11 @@ int access_status(uint16_t, uint16_t, ble_gatt_access_ctxt* ctxt, void*)
 int access_control(uint16_t, uint16_t, ble_gatt_access_ctxt* ctxt, void*)
 {
     if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR || g_instance == nullptr) return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
+    std::vector<std::uint8_t> write;
+    if (!flatten(ctxt->om, write)) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     std::vector<std::uint8_t> bytes;
-    if (!flatten(ctxt->om, bytes)) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    if (!decode_transport_frame(write, g_control_reassembler, bytes)) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    if (bytes.empty()) return 0;  // valid fragment, waiting for the remaining bytes
     protocol::DecodedFrame frame;
     if (!protocol::decode_frame(bytes, frame)) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
 
@@ -207,8 +226,11 @@ int access_control(uint16_t, uint16_t, ble_gatt_access_ctxt* ctxt, void*)
 int access_data(uint16_t, uint16_t, ble_gatt_access_ctxt* ctxt, void*)
 {
     if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
+    std::vector<std::uint8_t> write;
+    if (!flatten(ctxt->om, write)) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     std::vector<std::uint8_t> bytes;
-    if (!flatten(ctxt->om, bytes)) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    if (!decode_transport_frame(write, g_data_reassembler, bytes)) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    if (bytes.empty()) return 0;  // valid fragment, waiting for the remaining bytes
     protocol::DecodedFrame frame;
     protocol::TransferChunk chunk;
     const bool decoded = protocol::decode_frame(bytes, frame);
@@ -275,6 +297,8 @@ int gap_event(ble_gap_event* event, void*)
         case BLE_GAP_EVENT_CONNECT:
             if (event->connect.status == 0) {
                 g_conn_handle = event->connect.conn_handle;
+                g_control_reassembler.reset();
+                g_data_reassembler.reset();
                 if (g_instance != nullptr) g_instance->connection_changed(true);
                 ESP_LOGI(kTag, "BLE connected handle=%u", g_conn_handle);
             } else {
@@ -285,6 +309,8 @@ int gap_event(ble_gap_event* event, void*)
             ESP_LOGI(kTag, "BLE disconnected reason=%d", event->disconnect.reason);
             g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
             g_status_notify = g_ack_notify = g_event_notify = false;
+            g_control_reassembler.reset();
+            g_data_reassembler.reset();
             g_transfer = {};
             if (g_instance != nullptr) g_instance->connection_changed(false);
             advertise();
