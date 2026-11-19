@@ -1,7 +1,7 @@
 # BikeOS 2.8-inch TFT wiring handoff
 
-**Status: J1 reported OPEN — VCC=5V, LED=3V3. Perform the unpowered checks
-below before applying USB power.**
+**Status: J1 reported OPEN; ESP32 `5Vin` output configuration unverified — do
+not connect TFT power yet.**
 
 This document is hardware documentation only. It does not change firmware,
 GPIO configuration, the navigation engine, the iPhone app, or the BLE protocol.
@@ -29,6 +29,10 @@ the [ESP32-S3 N16R8 pinout manual](https://manuals.plus/asin/B0CDWXWXCG.pdf).
 The exact seller SKU is not printed clearly enough to claim a manufacturer
 identity, but the **header labels in the photos are now verified**.
 
+The board manual describes an `IN-OUT` selector for the `5Vin` rail: unbridged
+is input-only, bridged allows the USB 5V rail to be used as an output. The
+current photo does not resolve whether that selector is bridged.
+
 Important N16R8 restrictions remain: GPIO35-37 are connected to octal PSRAM;
 GPIO19-20 are native USB D-/D+; GPIO43-44 serve the `COM` USB-UART bridge;
 GPIO0, 3, 45, and 46 are boot-strapping pins. The existing firmware still
@@ -48,8 +52,8 @@ Simon’s exact board. The exact vendor/SKU and component population still need 
 clear back-side photograph.
 
 The supplied wiring-photo PDF shows the `J1` area as **open**, as confirmed by
-Simon. Treat that as the working power state for this handoff: TFT `VCC` is fed
-from the ESP32 `5V` header and TFT `LED` is fed from the ESP32 `3V3` header.
+Simon. That means the TFT `VCC` needs 5V, but the ESP32 `5Vin` pin must first be
+verified as a USB-powered output.
 
 Sources:
 
@@ -77,9 +81,10 @@ pad-to-pad continuity with USB power disconnected:
 - near-zero resistance / beep: J1 closed.
 
 Do not connect TFT VCC to ESP32 `3V3` while J1 is open. Do not connect LED to an
-ESP32 GPIO; use the `3V3` power header as specified by the module manual.
+ESP32 GPIO. The LED may use the ESP32 `3V3` power header, but leave both TFT
+power wires disconnected until the ESP32 `IN-OUT` selector is verified.
 
-## 3. Wiring table — final for the first power test
+## 3. Wiring table — signal wiring approved, power pending 5Vin check
 
 The ESP32 signal assignments below are conservative choices from the verified
 header silkscreen. GPIO10/11/12 are the board's conventional SPI CS/MOSI/SCK
@@ -88,14 +93,14 @@ group; GPIO4/5 are ordinary exposed GPIOs for display reset and D/C. These are
 
 | TFT pin | ESP32 header label | ESP32 GPIO | Wire type | Notes |
 |---|---|---:|---|---|
-| VCC | `5V` | `5V` power header | Female-to-male jumper | J1 open: onboard regulator expects 5V |
+| VCC | **Do not connect yet** | `5Vin` only if `IN-OUT` is bridged | Female-to-male jumper | J1 open requires 5V; verify the ESP32 selector first |
 | GND | `GND` | `GND` header pin | Female-to-male jumper | Use either verified ESP GND header pin |
 | CS | `10` | GPIO10 | Female-to-male jumper | Active-low TFT chip select |
 | RESET | `4` | GPIO4 | Female-to-male jumper | Active-low display reset |
 | DC | `5` | GPIO5 | Female-to-male jumper | Data/command select |
 | SDI(MOSI) | `11` | GPIO11 | Female-to-male jumper | SPI controller-to-display data |
 | SCK | `12` | GPIO12 | Female-to-male jumper | SPI clock |
-| LED | `3V3` | `3V3` power header | Female-to-male jumper | Always-on backlight per module manual; do not use a GPIO |
+| LED | **Do not connect yet** | `3V3` power header after 5Vin check | Female-to-male jumper | Always-on backlight per module manual; do not use a GPIO |
 | SDO(MISO) | Not connected | N/A | None | Safe to omit for write-only color-bar test, per module manual |
 
 The provisional ESP-IDF host for the future driver is **SPI2 / host 1**, because
@@ -123,8 +128,8 @@ GPIO10/11/12 plus GPIO4/5.
   exposes male headers. Use female-to-female only if both boards expose male
   pins and you are using a separate male-header breakout; do not force a loose
   wire onto a bare pad.
-- No level shifter should be needed for ESP32-S3 3.3 V logic. With J1 open, use
-  the TFT `5V` input shown in the final table.
+- No level shifter should be needed for ESP32-S3 3.3 V logic. With J1 open, the
+  TFT needs 5V, but the ESP32 `5Vin` output must be verified first.
 - Do not add a custom PCB yet. First verify the TFT J1 state and complete the
   continuity checks below.
 
@@ -146,15 +151,17 @@ With **both USB power and any external supply disconnected**:
 7. Check that the candidate ESP 3V3 and GND pins are the pins named by the
    carrier silkscreen, not merely adjacent pins.
 
-## 7. First-power procedure (J1 reported open)
+## 7. First-power procedure (blocked pending ESP32 5Vin check)
 
 1. Disconnect USB from the ESP32.
-2. Leave TFT touch, SD, and SDO disconnected; connect LED in step 5.
-3. Confirm J1 is open and use the final table: VCC to `5V`, LED to `3V3`.
+2. Leave TFT touch, SD, SDO, VCC, and LED disconnected.
+3. Confirm J1 is open. Inspect the ESP32 `IN-OUT` selector; do not bridge it
+   while powered.
 4. Connect TFT GND to the approved ESP GND pin first.
-5. Connect TFT VCC to ESP32 `5V` and TFT LED to ESP32 `3V3`.
-6. Connect CS, RESET, DC, MOSI, and SCK one wire at a time.
-7. Recheck for power-to-ground shorts and accidental adjacent-header bridges.
+5. Connect CS, RESET, DC, MOSI, and SCK one wire at a time.
+6. Recheck for power-to-ground shorts and accidental adjacent-header bridges.
+7. Only after the selector is confirmed bridged, connect TFT VCC to `5Vin` and
+   TFT LED to ESP32 `3V3`.
 8. Apply power through USB only after the checks pass. Do not connect another
    power supply to the ESP32 at the same time.
 9. A lit backlight, white screen, or black screen is **not** proof of SPI
@@ -182,19 +189,19 @@ No such configuration is enabled by this document.
 
 ## Instructions for Simon — Wire These Connections
 
-The ESP32 signal and power sides are now mapped. With both boards unpowered,
-connect these wires:
+The ESP32 signal side is mapped. With both boards unpowered, connect the signal
+wires below, but leave TFT power disconnected until the ESP32 `IN-OUT` selector
+is confirmed bridged:
 
 1. TFT `GND` -> ESP32 `GND`.
-2. TFT `VCC` -> ESP32 `5V`.
-3. TFT `LED` -> ESP32 `3V3`.
-4. TFT `CS` -> ESP32 GPIO10.
-5. TFT `RESET` -> ESP32 GPIO4.
-6. TFT `DC` -> ESP32 GPIO5.
-7. TFT `SDI(MOSI)` -> ESP32 GPIO11.
-8. TFT `SCK` -> ESP32 GPIO12.
-9. Leave TFT `SDO(MISO)`, touch, and SD pins disconnected.
+2. TFT `CS` -> ESP32 GPIO10.
+3. TFT `RESET` -> ESP32 GPIO4.
+4. TFT `DC` -> ESP32 GPIO5.
+5. TFT `SDI(MOSI)` -> ESP32 GPIO11.
+6. TFT `SCK` -> ESP32 GPIO12.
+7. Leave TFT `VCC`, `LED`, `SDO(MISO)`, touch, and SD pins disconnected.
 
-Before plugging in USB, check that there is no short between TFT `VCC` and
-`GND`, and that the `5V` and `3V3` wires are not swapped. Use only the ESP32
-USB cable as the power source for this first test.
+Once the selector is confirmed bridged, add TFT `VCC` -> ESP32 `5Vin` and TFT
+`LED` -> ESP32 `3V3`. Before plugging in USB, check that there is no short
+between TFT `VCC` and `GND`, and that the `5Vin` and `3V3` wires are not swapped.
+Use only the ESP32 USB cable as the power source for this first test.
