@@ -39,6 +39,15 @@ private:
     std::array<char, 128> line_{};
     std::size_t line_length_{};
     std::uint32_t overflow_count_{};
+    std::uint32_t bytes_received_{};
+    std::uint32_t lines_received_{};
+    std::uint32_t sentences_parsed_{};
+    std::uint32_t valid_fixes_{};
+    std::uint64_t last_stats_log_ms_{};
+    std::array<char, 96> last_rmc_{};
+    std::size_t last_rmc_length_{};
+    std::array<char, 96> last_gsv_{};
+    std::size_t last_gsv_length_{};
     bool initialized_{};
 };
 
