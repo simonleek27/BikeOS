@@ -45,7 +45,51 @@ config BIKEOS_DISPLAY_VIRTUAL
 
 config BIKEOS_DISPLAY_ST7565
     bool "Physical ST7565R over SPI (requires verified carrier wiring)"
+
+config BIKEOS_DISPLAY_ILI9341
+    bool "Physical ILI9341 2.8-inch TFT over SPI (verified wiring)"
 endchoice
+
+if BIKEOS_DISPLAY_ILI9341
+config BIKEOS_ILI9341_SPI_HOST
+    int "SPI host (1=SPI2, 2=SPI3)"
+    range 1 2
+    default 1
+
+config BIKEOS_ILI9341_MOSI_GPIO
+    int "ILI9341 SDI/MOSI GPIO"
+    range 0 48
+    default 11
+
+config BIKEOS_ILI9341_CLOCK_GPIO
+    int "ILI9341 SCK GPIO"
+    range 0 48
+    default 12
+
+config BIKEOS_ILI9341_CS_GPIO
+    int "ILI9341 CS GPIO"
+    range 0 48
+    default 10
+
+config BIKEOS_ILI9341_DC_GPIO
+    int "ILI9341 DC GPIO"
+    range 0 48
+    default 5
+
+config BIKEOS_ILI9341_RESET_GPIO
+    int "ILI9341 RESET GPIO"
+    range 0 48
+    default 4
+
+config BIKEOS_ILI9341_CLOCK_HZ
+    int "ILI9341 SPI clock (Hz)"
+    range 1000000 40000000
+    default 26000000
+
+config BIKEOS_DISPLAY_TEST_PATTERN
+    bool "Continuously show ILI9341 color-bar test pattern"
+    default y
+endif
 
 if BIKEOS_DISPLAY_ST7565
 config BIKEOS_LCD_SPI_HOST

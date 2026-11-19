@@ -3,6 +3,7 @@ idf_component_register(
         "app.cpp"
         "main.cpp"
         "navigation_runtime.cpp"
+        "ili9341_display.cpp"
         "st7565_display.cpp"
         "subsystem_status.cpp"
         "system_diagnostics.cpp"

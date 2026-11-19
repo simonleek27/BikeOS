@@ -21,6 +21,7 @@
 #include "bikeos/map_renderer.hpp"
 #include "bikeos/navigation.hpp"
 #include "bikeos/protocol.hpp"
+#include "ili9341_display.hpp"
 #include "st7565_display.hpp"
 #include "uart_gps_source.hpp"
 
@@ -55,6 +56,9 @@ struct NavigationRuntime::State {
 #endif
 #if CONFIG_BIKEOS_DISPLAY_ST7565
     std::unique_ptr<St7565Display> display;
+#endif
+#if CONFIG_BIKEOS_DISPLAY_ILI9341
+    std::unique_ptr<Ili9341Display> ili9341_display;
 #endif
     std::uint32_t step_count{};
     bool phone_connected{};
@@ -115,6 +119,21 @@ bool NavigationRuntime::initialize()
     });
     if (!state->display->initialize()) return false;
 #endif
+#if CONFIG_BIKEOS_DISPLAY_ILI9341
+    state->ili9341_display = std::make_unique<Ili9341Display>(Ili9341Config{
+        .spi_host = CONFIG_BIKEOS_ILI9341_SPI_HOST,
+        .mosi_gpio = CONFIG_BIKEOS_ILI9341_MOSI_GPIO,
+        .clock_gpio = CONFIG_BIKEOS_ILI9341_CLOCK_GPIO,
+        .chip_select_gpio = CONFIG_BIKEOS_ILI9341_CS_GPIO,
+        .data_command_gpio = CONFIG_BIKEOS_ILI9341_DC_GPIO,
+        .reset_gpio = CONFIG_BIKEOS_ILI9341_RESET_GPIO,
+        .clock_hz = CONFIG_BIKEOS_ILI9341_CLOCK_HZ,
+    });
+    if (!state->ili9341_display->initialize()) return false;
+#if CONFIG_BIKEOS_DISPLAY_TEST_PATTERN
+    if (!state->ili9341_display->show_test_pattern()) return false;
+#endif
+#endif
     ESP_LOGI(kTag,
              "OSM map ready: %u roads %u points %u bytes; route=%" PRIu32 " %.0fm %u points",
              static_cast<unsigned>(state->map.roads.size()),
@@ -130,6 +149,12 @@ bool NavigationRuntime::initialize()
 #endif
 #if CONFIG_BIKEOS_DISPLAY_ST7565
     constexpr const char* display_target = "physical ST7565R SPI";
+#elif CONFIG_BIKEOS_DISPLAY_ILI9341
+#if CONFIG_BIKEOS_DISPLAY_TEST_PATTERN
+    constexpr const char* display_target = "physical ILI9341 SPI test pattern";
+#else
+    constexpr const char* display_target = "physical ILI9341 SPI";
+#endif
 #else
     constexpr const char* display_target = "virtual ST7565 framebuffer";
 #endif
@@ -163,6 +188,10 @@ void NavigationRuntime::step(const std::uint64_t now_ms)
 #if CONFIG_BIKEOS_DISPLAY_ST7565
     if (!state_->display->flush(state_->framebuffer)) {
         ESP_LOGE(kTag, "LCD framebuffer transfer failed");
+    }
+#elif CONFIG_BIKEOS_DISPLAY_ILI9341 && !CONFIG_BIKEOS_DISPLAY_TEST_PATTERN
+    if (!state_->ili9341_display->flush(state_->framebuffer)) {
+        ESP_LOGE(kTag, "ILI9341 framebuffer transfer failed");
     }
 #endif
     const auto frame_crc = crc32(state_->framebuffer.bytes());
@@ -212,6 +241,8 @@ protocol::Status NavigationRuntime::status() const
     result.flags = static_cast<std::uint8_t>((navigation.gps_valid ? 1U : 0U) |
                                              (state_->phone_connected ? 2U : 0U));
 #if CONFIG_BIKEOS_DISPLAY_ST7565
+    result.flags = static_cast<std::uint8_t>(result.flags | 4U);
+#elif CONFIG_BIKEOS_DISPLAY_ILI9341
     result.flags = static_cast<std::uint8_t>(result.flags | 4U);
 #endif
     result.latitude_e7 = navigation.position.latitude_e7;
