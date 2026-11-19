@@ -20,10 +20,19 @@ The silicon and firmware target are verified:
 | ESP-IDF | 5.5.6 |
 | Current USB port | `/dev/cu.usbmodem1101` (can change) |
 
-The **carrier-board model, header labels, and exposed pins are not verified**.
-The chip identity is not enough to authorize a header-to-GPIO connection. The
-existing firmware deliberately leaves physical LCD and GPS GPIOs at `-1` until
-the carrier is identified.
+The supplied photo reference shows the **44-pin, dual-USB ESP32-S3-N16R8
+carrier layout**: two USB-C sockets labelled `COM` and `USB`, `RST`/`BOOT`
+buttons, and headers labelled with GPIO numbers, `3V3`, `5V`, and `GND`. The
+silkscreen matches the common YD-ESP32-S3/HiLetgo-style layout documented in
+the [ESP32-S3 N16R8 pinout manual](https://manuals.plus/asin/B0CDWXWXCG.pdf).
+The exact seller SKU is not printed clearly enough to claim a manufacturer
+identity, but the **header labels in the photos are now verified**.
+
+Important N16R8 restrictions remain: GPIO35-37 are connected to octal PSRAM;
+GPIO19-20 are native USB D-/D+; GPIO43-44 serve the `COM` USB-UART bridge;
+GPIO0, 3, 45, and 46 are boot-strapping pins. The existing firmware still
+deliberately leaves physical LCD and GPS GPIOs at `-1`; this document does not
+enable them.
 
 ### TFT
 
@@ -66,28 +75,28 @@ Until that check is complete, **do not connect VCC or LED**. Do not connect LED
 directly to an ESP32 GPIO; use the board’s verified current-limited path or a
 separate transistor/MOSFET path in the future.
 
-## 3. Wiring table — not yet approved
+## 3. Wiring table — signal pins approved, power still blocked
 
-The TFT-side functions are known, but the required ESP32 header labels and GPIO
-numbers are not. This table must remain unpopulated until the carrier-board
-photographs are reviewed.
+The ESP32 signal assignments below are conservative choices from the verified
+header silkscreen. GPIO10/11/12 are the board's conventional SPI CS/MOSI/SCK
+group; GPIO4/5 are ordinary exposed GPIOs for display reset and D/C. These are
+**wiring recommendations only** until the final continuity check is done.
 
 | TFT pin | ESP32 header label | ESP32 GPIO | Wire type | Notes |
 |---|---|---:|---|---|
-| VCC | **TBD — do not connect** | **TBD** | Power | J1 state and carrier 3V3/5V/VBUS labels must be verified first |
-| GND | **TBD — do not connect** | **TBD** | Ground | Use a verified ESP GND header pin |
-| CS | **TBD** | **TBD** | Female-to-male jumper | Active-low TFT chip select |
-| RESET | **TBD** | **TBD** | Female-to-male jumper | Active-low display reset |
-| DC | **TBD** | **TBD** | Female-to-male jumper | Data/command select |
-| SDI(MOSI) | **TBD** | **TBD** | Female-to-male jumper | SPI controller-to-display data |
-| SCK | **TBD** | **TBD** | Female-to-male jumper | SPI clock |
+| VCC | **TBD — do not connect** | **TBD** | Power | TFT J1 state is not visible in the supplied photo; verify 3V3 vs 5V first |
+| GND | `GND` | `GND` header pin | Female-to-male jumper | Use either verified ESP GND header pin |
+| CS | `10` | GPIO10 | Female-to-male jumper | Active-low TFT chip select |
+| RESET | `4` | GPIO4 | Female-to-male jumper | Active-low display reset |
+| DC | `5` | GPIO5 | Female-to-male jumper | Data/command select |
+| SDI(MOSI) | `11` | GPIO11 | Female-to-male jumper | SPI controller-to-display data |
+| SCK | `12` | GPIO12 | Female-to-male jumper | SPI clock |
 | LED | **TBD — leave disconnected** | **TBD** | None for first inspection | Backlight path/current must be verified |
 | SDO(MISO) | Not connected | N/A | None | Safe to omit for write-only color-bar test, per module manual |
 
 The provisional ESP-IDF host for the future driver is **SPI2 / host 1**, because
 that is the host exposed by the existing ST7565 configuration. This is not a
-pin assignment. The next firmware task must add a separate ILI9341 configuration
-after the physical header map is approved.
+firmware change or a claim that the driver is ready.
 
 ## 4. Keep these pins disconnected
 
@@ -97,10 +106,10 @@ Do not connect any of the following for the first display test:
 - microSD: `SD_CS`, `SD_MOSI`, `SD_MISO`, `SD_SCK`.
 - TFT `SDO(MISO)` unless a later readback test explicitly needs it.
 
-At the ESP32 side, do not select pins until the carrier photo is reviewed. In
-particular, preserve native USB pins, flash/PSRAM-connected pins, boot-strapping
-pins, and the future GPS UART. The earlier provisional suggestion of GPIO
-8/9/10/11/12 is **not approved**.
+At the ESP32 side, preserve native USB pins, flash/PSRAM-connected pins,
+boot-strapping pins, and the future GPS UART. The earlier provisional suggestion
+of GPIO 8/9/10/11/12 has been narrowed to the approved signal set in the table:
+GPIO10/11/12 plus GPIO4/5.
 
 ## 5. Physical materials
 
@@ -112,27 +121,28 @@ pins, and the future GPS UART. The earlier provisional suggestion of GPIO
   wire onto a bare pad.
 - No level shifter should be needed for ESP32-S3 3.3 V logic, but the TFT VCC
   selection still must be verified.
-- Do not add a custom PCB yet. First identify the carrier and the TFT J1 state.
+- Do not add a custom PCB yet. First verify the TFT J1 state and complete the
+  continuity checks below.
 
 ## 6. Multimeter checks before any power
 
 With **both USB power and any external supply disconnected**:
 
-1. Photograph the entire front and back of the ESP32 board, including every
-   header label and the USB connector.
-2. Photograph the entire back of the TFT and a close-up of J1, component labels,
-   and the 14-pin header orientation.
+1. The supplied PDF already provides the ESP32 front/back photos and header
+   labels; use it as the pinout reference.
+2. Obtain a close-up of the TFT J1 area, component labels, and the 14-pin
+   header orientation.
 3. Confirm the TFT header is actually soldered and identify pin 1 from the
    silkscreen. Do not infer left/right from a mirrored back view.
 4. Measure J1 continuity as described above.
-5. After a candidate carrier pin map is supplied, check continuity from each
-   candidate header pin to its silkscreen pad; do not use GPIO numbers alone.
+5. Check continuity from each selected ESP32 header pin to its silkscreen pad;
+   do not use GPIO numbers alone.
 6. Check for a short between TFT VCC and GND. Do not proceed if the reading is
    a hard short.
 7. Check that the candidate ESP 3V3 and GND pins are the pins named by the
    carrier silkscreen, not merely adjacent pins.
 
-## 7. First-power procedure (blocked pending photographs)
+## 7. First-power procedure (blocked pending J1 verification)
 
 1. Disconnect USB from the ESP32.
 2. Leave TFT touch, SD, LED, and SDO disconnected.
@@ -154,7 +164,7 @@ future UART pins.
 
 ## 9. Firmware handoff for the next milestone
 
-After Simon confirms the wiring and the exact carrier map:
+After Simon confirms the wiring and the TFT J1 state:
 
 - add an ILI9341 SPI driver on SPI2/host 1;
 - configure 320×240 landscape and RGB565;
@@ -167,14 +177,19 @@ No such configuration is enabled by this document.
 
 ## Instructions for Simon — Wire These Connections
 
-**Do not wire or power the TFT yet.** I still need these photographs:
+The ESP32 signal side is now mapped from the supplied photos. **Do not connect
+TFT VCC or LED yet** because the TFT J1 bridge is not readable. With both boards
+unpowered, you may prepare the five signal jumpers and ground, but leave the TFT
+power wire off:
 
-1. ESP32 board: sharp front and back photos showing the complete board,
-   silkscreen, headers, USB connector, and any board name/model.
-2. TFT: sharp back photo showing the full red PCB, the `J1` area, all component
-   labels, and the header orientation; include a close-up of J1.
+1. TFT `GND` -> ESP32 `GND`.
+2. TFT `CS` -> ESP32 GPIO10.
+3. TFT `RESET` -> ESP32 GPIO4.
+4. TFT `DC` -> ESP32 GPIO5.
+5. TFT `SDI(MOSI)` -> ESP32 GPIO11.
+6. TFT `SCK` -> ESP32 GPIO12.
+7. Leave TFT `VCC`, `LED`, `SDO(MISO)`, touch, and SD pins disconnected.
 
-Once those are available, I will replace every `TBD` in the table with the
-actual ESP32 header label and GPIO number, confirm whether VCC is 3V3 or 5V,
-and give you a one-wire-at-a-time connection list. Until then, leave USB
-disconnected from the ESP32 and do not connect the TFT.
+Before power is applied, send a close-up where the TFT `J1` pads are visible, or
+measure J1 continuity with USB disconnected. I will then confirm whether VCC
+goes to the ESP32 `3V3` or `5V` header and issue the final power step.
