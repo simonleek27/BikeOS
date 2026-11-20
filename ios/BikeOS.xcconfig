@@ -1,0 +1,5 @@
+// Local project settings. GraphHopper.xcconfig is intentionally ignored and
+// may contain a developer's API key; the optional include keeps clean clones
+// buildable without committing credentials.
+#include? "GraphHopper.xcconfig"
+
