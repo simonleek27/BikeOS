@@ -120,6 +120,13 @@ bool NavigationRuntime::initialize()
     if (!state->simulator.set_route(state->route)) return false;
     state->simulation_paused = true;
     state->navigation.set_run_state(NavigationRunState::not_started);
+    // Render the initial route even though the simulator waits for Start.
+    // Without this snapshot, the color TFT has nothing to draw while the
+    // simulator is paused in the ready-to-ride state.
+#if CONFIG_BIKEOS_DISPLAY_ILI9341 && !CONFIG_BIKEOS_DISPLAY_TEST_PATTERN
+    state->latest = state->navigation.snapshot();
+    state->have_latest = true;
+#endif
     // Keep the demo physically believable: 16.2 km/h is a normal bicycle pace.
     // The previous 18 m/s value made the moving-marker demo traverse the route
     // at motorway speed and made the LCD/phone telemetry hard to inspect.
@@ -316,6 +323,11 @@ void NavigationRuntime::set_phone_connected(const bool connected)
     std::scoped_lock lock(state_->mutex);
     state_->phone_connected = connected;
     state_->navigation.set_phone_connected(connected);
+#if CONFIG_BIKEOS_DISPLAY_ILI9341 && !CONFIG_BIKEOS_DISPLAY_TEST_PATTERN
+    // Keep the Bluetooth glyph current even while navigation is paused.
+    state_->latest = state_->navigation.snapshot();
+    state_->have_latest = true;
+#endif
 }
 
 protocol::Status NavigationRuntime::status() const
@@ -409,6 +421,10 @@ protocol::ResultCode NavigationRuntime::install_bundle(const std::uint32_t bundl
     state_->simulation_paused = true;
     state_->navigation.set_run_state(NavigationRunState::not_started);
 #endif
+#if CONFIG_BIKEOS_DISPLAY_ILI9341 && !CONFIG_BIKEOS_DISPLAY_TEST_PATTERN
+    state_->latest = state_->navigation.snapshot();
+    state_->have_latest = true;
+#endif
     state_->reroute_pending = false;
     ESP_LOGI(kTag, "Activated BLE bundle=%" PRIu32 " route=%" PRIu32, bundle_id, begin.route_id);
     return protocol::ResultCode::ok;
@@ -432,11 +448,19 @@ protocol::ResultCode NavigationRuntime::handle_navigation_command(const protocol
         case protocol::MessageType::pause_navigation:
             state_->simulation_paused = true;
             state_->navigation.set_run_state(NavigationRunState::paused);
+#if CONFIG_BIKEOS_DISPLAY_ILI9341 && !CONFIG_BIKEOS_DISPLAY_TEST_PATTERN
+            state_->latest = state_->navigation.snapshot();
+            state_->have_latest = true;
+#endif
             return protocol::ResultCode::ok;
         case protocol::MessageType::stop_navigation:
         case protocol::MessageType::cancel_navigation:
             state_->simulation_paused = true;
             state_->navigation.set_run_state(NavigationRunState::stopped);
+#if CONFIG_BIKEOS_DISPLAY_ILI9341 && !CONFIG_BIKEOS_DISPLAY_TEST_PATTERN
+            state_->latest = state_->navigation.snapshot();
+            state_->have_latest = true;
+#endif
             return protocol::ResultCode::ok;
         case protocol::MessageType::restart_navigation:
             if (state_->route.route_id == 0) return protocol::ResultCode::invalid_bundle;
@@ -453,6 +477,10 @@ protocol::ResultCode NavigationRuntime::handle_navigation_command(const protocol
             state_->simulation_paused = false;
             state_->navigation.set_run_state(NavigationRunState::running);
             state_->reroute_pending = false;
+#if CONFIG_BIKEOS_DISPLAY_ILI9341 && !CONFIG_BIKEOS_DISPLAY_TEST_PATTERN
+            state_->latest = state_->navigation.snapshot();
+            state_->have_latest = true;
+#endif
             return protocol::ResultCode::ok;
         case protocol::MessageType::trigger_off_route: {
             if (state_->route.route_id == 0) return protocol::ResultCode::invalid_bundle;
