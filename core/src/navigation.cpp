@@ -53,6 +53,10 @@ bool NavigationEngine::set_route(Route route)
     snapshot_.route_id = route_->route_id;
     snapshot_.state = NavigationState::waiting_for_gps;
     snapshot_.route_remaining_m = route_->total_distance_m;
+    // A standalone engine starts in an active state for backwards-compatible
+    // host previews; the ESP32 runtime explicitly switches fresh routes to
+    // not_started until the phone sends Start.
+    snapshot_.run_state = NavigationRunState::running;
     deviating_fixes_ = 0;
     rerouting_ = false;
     return true;
@@ -163,7 +167,9 @@ NavigationSnapshot NavigationEngine::update(const std::optional<GpsFix>& fix,
     snapshot_.matched_position = match->projected;
     snapshot_.matched_segment = match->segment;
     snapshot_.cross_track_distance_m = match->cross_track_m;
-    snapshot_.route_progress_m = std::max(snapshot_.route_progress_m, match->progress_m);
+    if (snapshot_.run_state == NavigationRunState::running) {
+        snapshot_.route_progress_m = std::max(snapshot_.route_progress_m, match->progress_m);
+    }
     snapshot_.route_remaining_m = std::max(0.0F, route_->total_distance_m - snapshot_.route_progress_m);
     snapshot_.gps_valid = true;
     snapshot_.heading_deg = fix->heading_deg;
@@ -209,6 +215,12 @@ void NavigationEngine::set_phone_connected(const bool connected)
     } else if (connected && snapshot_.state == NavigationState::phone_disconnected) {
         snapshot_.state = snapshot_.gps_valid ? NavigationState::navigating : NavigationState::waiting_for_gps;
     }
+}
+
+void NavigationEngine::set_run_state(const NavigationRunState state)
+{
+    snapshot_.run_state = state;
+    if (state == NavigationRunState::arrived) snapshot_.state = NavigationState::destination_reached;
 }
 
 void NavigationEngine::mark_rerouting()

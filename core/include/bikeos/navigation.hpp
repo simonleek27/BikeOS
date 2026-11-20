@@ -36,6 +36,14 @@ enum class NavigationState : std::uint8_t {
     error,
 };
 
+enum class NavigationRunState : std::uint8_t {
+    not_started,
+    running,
+    paused,
+    stopped,
+    arrived,
+};
+
 struct Maneuver {
     std::uint32_t point_index{};
     ManeuverType type{ManeuverType::straight};
@@ -82,6 +90,7 @@ struct NavigationSnapshot {
     bool heading_valid{};
     bool phone_connected{};
     bool reroute_requested{};
+    NavigationRunState run_state{NavigationRunState::not_started};
 };
 
 class NavigationEngine {
@@ -94,6 +103,7 @@ public:
                               bool phone_connected,
                               std::uint64_t now_monotonic_ms);
     void set_phone_connected(bool connected);
+    void set_run_state(NavigationRunState state);
     void mark_rerouting();
     const NavigationSnapshot& snapshot() const;
     const std::optional<Route>& route() const;

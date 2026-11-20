@@ -251,6 +251,7 @@ std::vector<std::uint8_t> encode_status(const Status& status)
     append_le(output, status.heading_deg_cdeg);
     append_le(output, status.speed_cms);
     append_le(output, status.matched_point_index);
+    append_le(output, static_cast<std::uint8_t>(status.run_state));
     append_le(output, status.reserved);
     return output;
 }
@@ -273,9 +274,14 @@ bool decode_status(const std::span<const std::uint8_t> payload, Status& output)
     }
     if (payload.size() == 36 && (!read_le(payload, offset, output.heading_deg_cdeg) ||
                                  !read_le(payload, offset, output.speed_cms) ||
-                                 !read_le(payload, offset, output.matched_point_index) ||
-                                 !read_le(payload, offset, output.reserved))) {
+                                 !read_le(payload, offset, output.matched_point_index))) {
         return false;
+    }
+    if (payload.size() == 36) {
+        std::uint8_t run_state = 0;
+        if (!read_le(payload, offset, run_state) || !read_le(payload, offset, output.reserved) ||
+            run_state > static_cast<std::uint8_t>(RunState::arrived)) return false;
+        output.run_state = static_cast<RunState>(run_state);
     }
     output.navigation_state = static_cast<NavigationState>(navigation_state);
     output.gps_source = static_cast<GpsSource>(gps_source);

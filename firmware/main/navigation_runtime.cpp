@@ -39,6 +39,18 @@ namespace {
 constexpr char kTag[] = "navigation";
 constexpr float kDemoSpeedMps = 4.5F;
 
+protocol::RunState protocol_run_state(const NavigationRunState state)
+{
+    switch (state) {
+    case NavigationRunState::running: return protocol::RunState::running;
+    case NavigationRunState::paused: return protocol::RunState::paused;
+    case NavigationRunState::stopped: return protocol::RunState::stopped;
+    case NavigationRunState::arrived: return protocol::RunState::arrived;
+    case NavigationRunState::not_started: return protocol::RunState::not_started;
+    }
+    return protocol::RunState::not_started;
+}
+
 std::uint64_t uptime_ms()
 {
     return static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
@@ -106,6 +118,8 @@ bool NavigationRuntime::initialize()
     }
 #if CONFIG_BIKEOS_GPS_SIM
     if (!state->simulator.set_route(state->route)) return false;
+    state->simulation_paused = true;
+    state->navigation.set_run_state(NavigationRunState::not_started);
     // Keep the demo physically believable: 16.2 km/h is a normal bicycle pace.
     // The previous 18 m/s value made the moving-marker demo traverse the route
     // at motorway speed and made the LCD/phone telemetry hard to inspect.
@@ -205,6 +219,7 @@ void NavigationRuntime::step(const std::uint64_t now_ms)
     std::optional<GpsFix> accepted;
     if (candidate) accepted = state_->filter.accept(*candidate);
     const auto navigation = state_->navigation.update(accepted, state_->phone_connected, now_ms);
+    if (navigation.run_state == NavigationRunState::arrived) state_->simulation_paused = true;
     if (accepted && accepted->utc_epoch_ms != 0) {
         state_->utc_epoch_ms = accepted->utc_epoch_ms;
         state_->utc_epoch_received_ms = uptime_ms();
@@ -334,9 +349,10 @@ protocol::Status NavigationRuntime::status() const
         result.heading_deg_cdeg = static_cast<std::uint16_t>(std::clamp(navigation.heading_deg, 0.0F, 359.99F) * 100.0F);
     }
 #if CONFIG_BIKEOS_GPS_SIM
-    result.speed_cms = 450;
+    result.speed_cms = navigation.run_state == NavigationRunState::running ? 450 : 0;
 #endif
     result.matched_point_index = static_cast<std::uint16_t>(std::min<std::size_t>(navigation.matched_segment, 65535));
+    result.run_state = protocol_run_state(navigation.run_state);
     return result;
 }
 
@@ -360,9 +376,22 @@ protocol::ResultCode NavigationRuntime::install_bundle(const std::uint32_t bundl
     }
     MapDataset candidate_map;
     Route candidate_route;
-    if (!decode_map(map_bytes, candidate_map) || !decode_route(route_bytes, candidate_route) ||
+    const bool route_only = map_bytes.empty();
+    if ((!route_only && !decode_map(map_bytes, candidate_map)) || !decode_route(route_bytes, candidate_route) ||
         candidate_route.route_id != begin.route_id) {
         return protocol::ResultCode::invalid_bundle;
+    }
+    if (route_only) {
+        candidate_map.version = 4;
+        candidate_map.origin = candidate_route.points.front();
+        candidate_map.minimum = candidate_route.points.front();
+        candidate_map.maximum = candidate_route.points.front();
+        for (const auto point : candidate_route.points) {
+            candidate_map.minimum.latitude_e7 = std::min(candidate_map.minimum.latitude_e7, point.latitude_e7);
+            candidate_map.minimum.longitude_e7 = std::min(candidate_map.minimum.longitude_e7, point.longitude_e7);
+            candidate_map.maximum.latitude_e7 = std::max(candidate_map.maximum.latitude_e7, point.latitude_e7);
+            candidate_map.maximum.longitude_e7 = std::max(candidate_map.maximum.longitude_e7, point.longitude_e7);
+        }
     }
     std::scoped_lock lock(state_->mutex);
     if (!state_->navigation.set_route(candidate_route)) return protocol::ResultCode::invalid_bundle;
@@ -378,6 +407,7 @@ protocol::ResultCode NavigationRuntime::install_bundle(const std::uint32_t bundl
          SimulationEventType::gps_loss, 0.0F},
     });
     state_->simulation_paused = true;
+    state_->navigation.set_run_state(NavigationRunState::not_started);
 #endif
     state_->reroute_pending = false;
     ESP_LOGI(kTag, "Activated BLE bundle=%" PRIu32 " route=%" PRIu32, bundle_id, begin.route_id);
@@ -393,12 +423,20 @@ protocol::ResultCode NavigationRuntime::handle_navigation_command(const protocol
         case protocol::MessageType::start_navigation:
         case protocol::MessageType::resume_navigation:
             if (state_->route.route_id == 0) return protocol::ResultCode::invalid_bundle;
+            if (state_->navigation.snapshot().run_state == NavigationRunState::arrived) {
+                return protocol::ResultCode::invalid_bundle;
+            }
             state_->simulation_paused = false;
+            state_->navigation.set_run_state(NavigationRunState::running);
             return protocol::ResultCode::ok;
         case protocol::MessageType::pause_navigation:
+            state_->simulation_paused = true;
+            state_->navigation.set_run_state(NavigationRunState::paused);
+            return protocol::ResultCode::ok;
         case protocol::MessageType::stop_navigation:
         case protocol::MessageType::cancel_navigation:
             state_->simulation_paused = true;
+            state_->navigation.set_run_state(NavigationRunState::stopped);
             return protocol::ResultCode::ok;
         case protocol::MessageType::restart_navigation:
             if (state_->route.route_id == 0) return protocol::ResultCode::invalid_bundle;
@@ -413,6 +451,7 @@ protocol::ResultCode NavigationRuntime::handle_navigation_command(const protocol
             state_->filter.reset();
             if (!state_->navigation.set_route(state_->route)) return protocol::ResultCode::invalid_bundle;
             state_->simulation_paused = false;
+            state_->navigation.set_run_state(NavigationRunState::running);
             state_->reroute_pending = false;
             return protocol::ResultCode::ok;
         case protocol::MessageType::trigger_off_route: {

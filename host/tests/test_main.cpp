@@ -150,6 +150,13 @@ void test_navigation_and_reroute()
     CHECK(snapshot.following_maneuver->type == bikeos::ManeuverType::left);
     CHECK(std::abs(snapshot.following_maneuver_gap_m - 100.0F) < 1.0F);
 
+    engine.set_run_state(bikeos::NavigationRunState::paused);
+    const float paused_progress = engine.snapshot().route_progress_m;
+    snapshot = engine.update(fix_at(offset(start, 90, 100), 1500), true, 1500);
+    CHECK(snapshot.run_state == bikeos::NavigationRunState::paused);
+    CHECK(snapshot.route_progress_m == paused_progress);
+    engine.set_run_state(bikeos::NavigationRunState::running);
+
     for (std::uint64_t tick = 2; tick <= 6; ++tick) {
         snapshot = engine.update(fix_at(offset(start, 45, 60), tick * 1000), true, tick * 1000);
     }
@@ -347,6 +354,16 @@ void test_ble_protocol()
     Status status;
     CHECK(decode_status(status_payload, status));
     CHECK(status.navigation_state == NavigationState::navigating && status.next_maneuver_m == 18);
+
+    const auto paused_payload = encode_status(Status{.navigation_state = NavigationState::navigating,
+                                                     .gps_source = GpsSource::simulated,
+                                                     .flags = 3,
+                                                     .active_route_id = 42,
+                                                     .route_remaining_m = 123,
+                                                     .run_state = RunState::paused});
+    Status paused_status;
+    CHECK(decode_status(paused_payload, paused_status));
+    CHECK(paused_status.run_state == RunState::paused);
 
     const auto command = encode_frame(
         {.type = MessageType::trigger_off_route, .transfer_id = 0, .sequence = 8, .flags = 0}, {});

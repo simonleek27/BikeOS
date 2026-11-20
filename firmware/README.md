@@ -42,7 +42,7 @@ Exit the monitor with `Ctrl-]`.
 If auto-reset does not enter download mode: hold **BOOT**, tap and release
 **RST/EN**, release **BOOT**, then rerun the flash command.
 
-Expected output includes BikeOS 0.4.0, ESP32-S3 diagnostics, map/route counts,
+Expected output includes BikeOS 0.5.0, ESP32-S3 diagnostics, map/route counts,
 navigation state, progress, cross-track and maneuver distances, framebuffer
 CRCs, reroute requests, and a heartbeat.
 

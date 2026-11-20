@@ -1,6 +1,6 @@
 # Development progress
 
-Updated: 19 November 2026
+Updated: 20 November 2026
 
 | Feature | Status | Evidence / next action |
 |---|---|---|
@@ -15,9 +15,9 @@ Updated: 19 November 2026
 | LCD identification | Complete | ERC12864SBSF-14, ST7565R, 128 × 64, 30-pin 0.5 mm FPC |
 | LCD SPI driver | Implemented, not physically tested | Needs bottom-contact carrier and charge-pump capacitor network |
 | LCD wiring | Blocked on physical carrier | Provide adapter/carrier and clear ESP board photos; then assign GPIOs |
-| BLE route transfer | ACK-driven implementation | iPhone waits for begin/chunk/commit ACKs, sends bounded chunks, validates transfer/bundle IDs, and verifies the activated route ID from status |
-| iPhone app | Physical-demo ready | SwiftUI renders the bundled route, follows authoritative ESP32 telemetry, exposes Start/Pause/Resume/Restart/Stop/off-route controls, and builds successfully for the iOS simulator |
-| Indoor simulator controls | Complete | Deterministic 4.5 m/s simulator pauses after transfer, supports explicit control frames, and has repeatable off-route/GPS-loss events |
+| BLE route transfer | Implemented and tested | ACK-paced transfer, 20/23/244/247-byte ATT fragmentation, strict reassembly, route-only bundles, transfer diagnostics, and activated-route verification |
+| iPhone app | Navigation/planner redesign implemented | Compact map-first navigation layout, authoritative run-state controls, robust hit targets, real destination search, GraphHopper bicycle routing, route preview, and custom BRTE upload |
+| Indoor simulator controls | Complete | Deterministic 4.5 m/s simulator starts only after Start, pauses at the exact position with speed 0, resumes, restarts, stops, and reports run state over BLE |
 
 ## Current assessment
 
@@ -26,14 +26,21 @@ ESP execution, verified ILI9341 TFT, and the first real iPhone↔ESP32 BLE
 connection are working. The iPhone and ESP32 share the same validated BRTE
 route metadata, and transfer progress is driven by acknowledgements rather than
 a blind write burst. GPS is currently the deterministic scripted source; no
-physical GPS module is connected.
+physical GPS module is connected. Custom routes are encoded into BRTE v1 and
+sent as route-only bundles; this keeps the rider and route correct outside the
+bundled Amsterdam BMAP coverage instead of showing unrelated roads.
+
+Firmware 0.5.0 builds successfully. A flash was attempted on
+`/dev/cu.usbmodem1101`, but esptool received no serial data from the board, so
+the physical 0.5.0 flash is intentionally not marked complete until the board
+is reset into its bootloader or the USB connection is re-established.
 
 ## Next priorities
 
-1. Repeat the demo-route transfer on the physical board and capture the final
-   commit ACK plus activated route status in the serial log.
-2. Run the full physical TFT ride sequence and capture the Start/Pause/off-route
-   states on the ILI9341 and iPhone together.
+1. Flash firmware 0.5.0 and repeat custom-route transfer on the physical board;
+   capture the commit ACK and activated route status in the serial log.
+2. Run the full physical TFT ride sequence and capture the Start/Pause/resume/
+   disconnect states on the ILI9341 and iPhone together.
 3. Connect and verify a physical GPS module, then replace deterministic GPS
    simulation for field testing.
 

@@ -125,7 +125,7 @@ int access_device_info(uint16_t, uint16_t, ble_gatt_access_ctxt* ctxt, void*)
 {
     if (ctxt->op != BLE_GATT_ACCESS_OP_READ_CHR) return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
     constexpr char info[] =
-        "BikeOS firmware=0.4.0 protocol=1 capabilities=sim-gps,bmap-v4,brte-v1,nav-controls,ble-fragments";
+        "BikeOS firmware=0.5.0 protocol=1 capabilities=sim-gps,bmap-v4,brte-v1,nav-controls,ble-fragments,run-state,route-only";
     return os_mbuf_append(ctxt->om, info, sizeof(info) - 1) == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 
@@ -173,7 +173,7 @@ int access_control(uint16_t, uint16_t, ble_gatt_access_ctxt* ctxt, void*)
         if (g_transfer.active) {
             acknowledgement.result = protocol::ResultCode::busy;
         } else if (!protocol::decode_transfer_begin(frame.payload, begin) || begin.bundle_id == 0 ||
-                   begin.route_id == 0 || begin.map_size == 0 || begin.route_size == 0 ||
+                   begin.route_id == 0 || begin.route_size == 0 ||
                    begin.map_size > protocol::max_bundle_size || begin.route_size > protocol::max_bundle_size ||
                    begin.route_size > protocol::max_bundle_size - begin.map_size) {
             acknowledgement.result = protocol::ResultCode::invalid_transfer;

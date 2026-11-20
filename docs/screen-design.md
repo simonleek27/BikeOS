@@ -70,7 +70,12 @@ counts down. Problem states tint the card but keep the layout.
 Chips: the clock shows `--:--` until the GPS has given a time. Local time is
 Europe/Amsterdam (CET/CEST). ETA assumes 15 km/h over the remaining distance.
 The GPS dot is green with a fix, red when lost, gray otherwise; the phone
-glyph is blue when connected, gray when not.
+glyph is blue/green when connected and orange when disconnected.
+
+The current color renderer labels both indicators in the status chip (`GPS` and
+`BT`) so a valid GPS fix cannot be mistaken for a phone connection. The BT label
+uses `NavigationRuntime::set_phone_connected()` and turns off immediately on the
+BLE disconnect callback.
 
 ## Implementation notes
 

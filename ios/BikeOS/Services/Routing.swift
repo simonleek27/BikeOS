@@ -41,9 +41,9 @@ struct BikeOSRoutePlan: Identifiable {
 }
 
 enum BikeOSRouteDecodeError: LocalizedError {
-    case missingAsset, invalidHeader, unsupportedVersion, invalidPayload, checksumMismatch, invalidManeuver
+    case missingAsset, invalidHeader, unsupportedVersion, invalidPayload, checksumMismatch, invalidManeuver, unsupportedGeometry
     var errorDescription: String? {
-        switch self { case .missingAsset: "The bundled route file is missing."; case .invalidHeader: "The route header is invalid."; case .unsupportedVersion: "This route uses an unsupported BRTE version."; case .invalidPayload: "The route payload length or bounds are invalid."; case .checksumMismatch: "The route checksum does not match."; case .invalidManeuver: "A route maneuver record is invalid." }
+        switch self { case .missingAsset: "The bundled route file is missing."; case .invalidHeader: "The route header is invalid."; case .unsupportedVersion: "This route uses an unsupported BRTE version."; case .invalidPayload: "The route payload length or bounds are invalid."; case .checksumMismatch: "The route checksum does not match."; case .invalidManeuver: "A route maneuver record is invalid."; case .unsupportedGeometry: "This route is too large for the ESP32 route format. Choose a shorter route or split the trip." }
     }
 }
 
@@ -64,6 +64,45 @@ enum BikeOSRouteDecoder {
         return BikeOSRoutePlan(id: routeID, name: name, points: points, maneuvers: enriched, source: source)
     }
     static func loadBundledDemo() throws -> BikeOSRoutePlan { guard let url = Bundle.main.url(forResource: "amsterdam_demo", withExtension: "brte"), let data = try? Data(contentsOf: url) else { throw BikeOSRouteDecodeError.missingAsset }; return try decode(data, name: "Amsterdam demo route", source: "Bundled BRTE") }
+}
+
+enum BikeOSRouteEncoder {
+    static func encode(_ route: BikeOSRoutePlan) throws -> Data {
+        guard route.points.count >= 2, route.points.count <= Int(UInt16.max),
+              route.maneuvers.count <= Int(UInt16.max) else { throw BikeOSRouteDecodeError.unsupportedGeometry }
+        guard route.points.allSatisfy({ $0.latitude.isFinite && $0.longitude.isFinite &&
+                                        (-90.0...90.0).contains($0.latitude) &&
+                                        (-180.0...180.0).contains($0.longitude) }) else {
+            throw BikeOSRouteDecodeError.unsupportedGeometry
+        }
+        let originLat = Int64((route.points[0].latitude * 10_000_000).rounded())
+        let originLon = Int64((route.points[0].longitude * 10_000_000).rounded())
+        var payload = Data()
+        for point in route.points {
+            let lat = Int64((point.latitude * 10_000_000).rounded()) - originLat
+            let lon = Int64((point.longitude * 10_000_000).rounded()) - originLon
+            guard abs(lat) <= Int64(Int16.max) * 10, abs(lon) <= Int64(Int16.max) * 10 else {
+                throw BikeOSRouteDecodeError.unsupportedGeometry
+            }
+            payload.appendLE(Int16(max(Int64(Int16.min), min(Int64(Int16.max), lat / 10))))
+            payload.appendLE(Int16(max(Int64(Int16.min), min(Int64(Int16.max), lon / 10))))
+        }
+        for maneuver in route.maneuvers {
+            guard maneuver.pointIndex >= 0, maneuver.pointIndex < route.points.count else { throw BikeOSRouteDecodeError.invalidManeuver }
+            let name = Data(maneuver.streetName.utf8)
+            guard name.count <= 96 else { throw BikeOSRouteDecodeError.invalidManeuver }
+            payload.appendLE(UInt16(maneuver.pointIndex))
+            payload.append(maneuver.type.rawValue)
+            payload.append(UInt8(name.count))
+            payload.append(name)
+        }
+        var output = Data([0x42, 0x52, 0x54, 0x45])
+        output.appendLE(UInt16(1)); output.appendLE(UInt16(0)); output.appendLE(route.routeID)
+        output.appendLE(Int32(originLat)); output.appendLE(Int32(originLon))
+        output.appendLE(UInt16(route.points.count)); output.appendLE(UInt16(route.maneuvers.count))
+        output.appendLE(UInt32(payload.count)); output.appendLE(BikeOSFrame.crc32(payload)); output.append(payload)
+        return output
+    }
 }
 
 protocol BikeOSRoutingService { func route(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D) async throws -> BikeOSRoutePlan }

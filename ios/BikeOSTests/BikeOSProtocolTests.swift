@@ -1,3 +1,4 @@
+import CoreLocation
 import XCTest
 @testable import BikeOS
 
@@ -43,6 +44,44 @@ final class BikeOSProtocolTests: XCTestCase {
         var ackPayload = Data([BikeOSResultCode.accepted.rawValue]); ackPayload.appendLE(UInt32(150)); ackPayload.appendLE(UInt32(99))
         let ack = BikeOSAcknowledgement.decode(BikeOSFrame(type: .acknowledgement, transferID: 8, sequence: 1, flags: 0, payload: ackPayload))
         XCTAssertEqual(ack?.result, .accepted); XCTAssertEqual(ack?.nextOffset, 150); XCTAssertEqual(ack?.bundleID, 99)
+    }
+
+    func testPausedStatusCarriesAuthoritativeRunStateAndZeroSpeed() {
+        var payload = Data([1, BikeOSNavigationState.navigating.rawValue, BikeOSGpsSource.simulated.rawValue, 3])
+        payload.appendLE(Int32(523548000)); payload.appendLE(Int32(48775000)); payload.appendLE(UInt32(42)); payload.appendLE(UInt32(120)); payload.appendLE(UInt32(18)); payload.appendLE(UInt32(999)); payload.appendLE(UInt16(12345)); payload.appendLE(UInt16(0)); payload.appendLE(UInt16(17)); payload.appendLE(UInt16(2))
+        let status = BikeOSStatus.decode(BikeOSFrame(type: .status, transferID: 0, sequence: 1, flags: 0, payload: payload))
+        XCTAssertEqual(status?.runState, .paused)
+        XCTAssertEqual(status?.speedMPS ?? -1, 0, accuracy: 0.001)
+    }
+
+    func testRouteEncoderRoundTripsSupportedGeometry() throws {
+        let origin = CLLocationCoordinate2D(latitude: 52.3548, longitude: 4.8775)
+        let route = BikeOSRoutePlan(id: 42,
+                                    name: "Test route",
+                                    points: [origin,
+                                             CLLocationCoordinate2D(latitude: 52.3550, longitude: 4.8777),
+                                             CLLocationCoordinate2D(latitude: 52.3552, longitude: 4.8777)],
+                                    maneuvers: [BikeOSManeuver(id: 0, pointIndex: 1, type: .right, streetName: "Damrak", distanceM: 0)],
+                                    source: "Test")
+        let encoded = try BikeOSRouteEncoder.encode(route)
+        let decoded = try BikeOSRouteDecoder.decode(encoded)
+        XCTAssertEqual(decoded.routeID, route.routeID)
+        XCTAssertEqual(decoded.points.count, route.points.count)
+        XCTAssertEqual(decoded.maneuvers.first?.streetName, "Damrak")
+    }
+
+    func testRouteEncoderRejectsInvalidOrTooWideGeometry() {
+        let invalid = BikeOSRoutePlan(id: 3, name: "Invalid", points: [
+            CLLocationCoordinate2D(latitude: 100.0, longitude: 4.0),
+            CLLocationCoordinate2D(latitude: 52.0, longitude: 4.1)
+        ])
+        XCTAssertThrowsError(try BikeOSRouteEncoder.encode(invalid))
+
+        let tooWide = BikeOSRoutePlan(id: 4, name: "Too wide", points: [
+            CLLocationCoordinate2D(latitude: 52.0, longitude: 4.0),
+            CLLocationCoordinate2D(latitude: 52.0, longitude: 4.05)
+        ])
+        XCTAssertThrowsError(try BikeOSRouteEncoder.encode(tooWide))
     }
 
     func testBLEFragmentEnvelopeAtLowAndHighATTLimits() {

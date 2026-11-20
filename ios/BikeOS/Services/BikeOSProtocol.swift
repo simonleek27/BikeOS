@@ -22,6 +22,7 @@ extension BikeOSResultCode {
     }
 }
 enum BikeOSNavigationState: UInt8 { case noRoute = 0, waitingForGPS = 1, navigating = 2, gpsLost = 3, offRoute = 4, rerouting = 5, phoneDisconnected = 6, destinationReached = 7, error = 8 }
+enum BikeOSRunState: UInt8, Equatable { case notStarted = 0, running = 1, paused = 2, stopped = 3, arrived = 4 }
 enum BikeOSGpsSource: UInt8 { case none = 0, simulated = 1, uart = 2, iPhoneFallback = 3 }
 
 struct BikeOSFrame {
@@ -68,8 +69,10 @@ struct BikeOSStatus {
     let headingDeg: Double?
     let speedMPS: Double?
     let matchedPointIndex: UInt16?
+    let runState: BikeOSRunState
 
     var gpsValid: Bool { (flags & 0x01) != 0 }
+    var phoneConnected: Bool { (flags & 0x02) != 0 }
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: Double(latitudeE7) * 1e-7,
                                longitude: Double(longitudeE7) * 1e-7)
@@ -79,7 +82,8 @@ struct BikeOSStatus {
         guard frame.type == .status || frame.type == .rerouteRequest, (frame.payload.count == 28 || frame.payload.count == 36), frame.payload[0] == 1,
               let state = BikeOSNavigationState(rawValue: frame.payload[1]), let gps = BikeOSGpsSource(rawValue: frame.payload[2]) else { return nil }
         let extended = frame.payload.count == 36
-        return BikeOSStatus(state: state, gps: gps, flags: frame.payload[3], latitudeE7: Int32(bitPattern: frame.payload.leUInt32(at: 4)), longitudeE7: Int32(bitPattern: frame.payload.leUInt32(at: 8)), routeID: frame.payload.leUInt32(at: 12), remainingM: frame.payload.leUInt32(at: 16), nextManeuverM: frame.payload.leUInt32(at: 20), freeHeap: frame.payload.leUInt32(at: 24), headingDeg: extended ? Double(frame.payload.leUInt16(at: 28)) / 100.0 : nil, speedMPS: extended ? Double(frame.payload.leUInt16(at: 30)) / 100.0 : nil, matchedPointIndex: extended ? frame.payload.leUInt16(at: 32) : nil)
+        let runState = extended ? BikeOSRunState(rawValue: frame.payload[34]) ?? .notStarted : .notStarted
+        return BikeOSStatus(state: state, gps: gps, flags: frame.payload[3], latitudeE7: Int32(bitPattern: frame.payload.leUInt32(at: 4)), longitudeE7: Int32(bitPattern: frame.payload.leUInt32(at: 8)), routeID: frame.payload.leUInt32(at: 12), remainingM: frame.payload.leUInt32(at: 16), nextManeuverM: frame.payload.leUInt32(at: 20), freeHeap: frame.payload.leUInt32(at: 24), headingDeg: extended ? Double(frame.payload.leUInt16(at: 28)) / 100.0 : nil, speedMPS: extended ? Double(frame.payload.leUInt16(at: 30)) / 100.0 : nil, matchedPointIndex: extended ? frame.payload.leUInt16(at: 32) : nil, runState: runState)
     }
 }
 

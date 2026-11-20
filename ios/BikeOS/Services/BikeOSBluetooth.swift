@@ -69,6 +69,7 @@ enum BikeOSBLEFragment {
     @Published private(set) var transferProgress: Double?
     @Published private(set) var liveCoordinate: CLLocationCoordinate2D?
     @Published private(set) var liveHeading: Double?
+    @Published private(set) var pendingNavigationCommand: BikeOSMessageType?
 
     private enum TransferPhase { case idle, waitingForBeginAck, sending, verifying, activated, failed }
     private var phase: TransferPhase = .idle
@@ -83,9 +84,10 @@ enum BikeOSBLEFragment {
     private var transferBytes = Data()
     private var nextOffset = 0
     private var commitSent = false
-    private var pendingCommands: [UInt32: String] = [:]
+    private var pendingCommands: [UInt32: (label: String, type: BikeOSMessageType)] = [:]
     private var interpolationTask: Task<Void, Never>?
     private var transferTimeoutTask: Task<Void, Never>?
+    private var commandTimeoutTask: Task<Void, Never>?
     private var ackNotifyReady = false
     private var statusNotifyReady = false
     private var fragmentMessageID: UInt16 = 1
@@ -142,6 +144,26 @@ enum BikeOSBLEFragment {
             lastAck = "Bundled BRTE route failed validation"
             return
         }
+        beginTransfer(route: decodedRoute, map: map, routeBytes: route, displayName: "Amsterdam route")
+    }
+
+    func sendRoute(_ route: BikeOSRoutePlan) {
+        guard isReadyForTransfer else {
+            lastAck = "Connect to BikeOS and wait until it is Ready"
+            return
+        }
+        do {
+            let routeBytes = try BikeOSRouteEncoder.encode(route)
+            beginTransfer(route: route, map: Data(), routeBytes: routeBytes, displayName: route.name)
+        } catch {
+            lastAck = error.localizedDescription
+        }
+    }
+
+    private func beginTransfer(route decodedRoute: BikeOSRoutePlan,
+                               map: Data,
+                               routeBytes route: Data,
+                               displayName: String) {
         bundleID = UInt32(Date().timeIntervalSince1970) ^ 0xB1CE_0005
         routeID = decodedRoute.routeID
         transferID = bundleID
@@ -159,16 +181,16 @@ enum BikeOSBLEFragment {
         begin.appendLE(BikeOSFrame.crc32(map))
         begin.appendLE(BikeOSFrame.crc32(route))
         begin.appendLE(BikeOSFrame.crc32(transferBytes))
-        lastAck = "Preparing Amsterdam route (0%)"
+        lastAck = "Preparing \(displayName) (0%)"
         sendControl(type: .transferBegin, payload: begin, transferID: transferID, trackAck: false)
         armTransferTimeout()
     }
 
-    func startNavigation() { sendDemoCommand(.startNavigation, label: "Navigation started") }
-    func pauseNavigation() { sendDemoCommand(.pauseNavigation, label: "Navigation paused") }
-    func resumeNavigation() { sendDemoCommand(.resumeNavigation, label: "Navigation resumed") }
-    func restartNavigation() { sendDemoCommand(.restartNavigation, label: "Navigation restarted") }
-    func stopNavigation() { sendDemoCommand(.stopNavigation, label: "Navigation stopped") }
+    func startNavigation() { sendDemoCommand(.startNavigation, label: "Starting navigation") }
+    func pauseNavigation() { sendDemoCommand(.pauseNavigation, label: "Pausing navigation") }
+    func resumeNavigation() { sendDemoCommand(.resumeNavigation, label: "Resuming navigation") }
+    func restartNavigation() { sendDemoCommand(.restartNavigation, label: "Restarting navigation") }
+    func stopNavigation() { sendDemoCommand(.stopNavigation, label: "Stopping navigation") }
     func triggerOffRoute() { sendDemoCommand(.triggerOffRoute, label: "Off-route test requested") }
 
     private func sendDemoCommand(_ type: BikeOSMessageType, label: String) {
@@ -176,7 +198,25 @@ enum BikeOSBLEFragment {
             lastAck = "Connect to BikeOS and wait until it is Ready"
             return
         }
-        sendControl(type: type, payload: Data(), label: label)
+        guard pendingNavigationCommand == nil else {
+            lastAck = "Waiting for ESP32 to confirm the previous command"
+            return
+        }
+        pendingNavigationCommand = type
+        let sequence = sendControl(type: type, payload: Data(), label: label)
+        if sequence == 0 {
+            pendingNavigationCommand = nil
+            return
+        }
+        commandTimeoutTask?.cancel()
+        commandTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled, let self else { return }
+            guard self.pendingNavigationCommand == type else { return }
+            self.pendingNavigationCommand = nil
+            self.pendingCommands.removeValue(forKey: sequence)
+            self.lastAck = "ESP32 did not confirm the command — try again"
+        }
     }
 
     private func sendNextChunk() {
@@ -199,7 +239,7 @@ enum BikeOSBLEFragment {
             return
         }
         guard write(frame, to: data, on: peripheral) else { return }
-        lastAck = "Sending Amsterdam route (\(Int(Double(end) / Double(transferBytes.count) * 100))%)"
+        lastAck = "Sending route (\(Int(Double(end) / Double(max(1, transferBytes.count)) * 100))%)"
         armTransferTimeout()
     }
 
@@ -229,8 +269,8 @@ enum BikeOSBLEFragment {
             lastAck = "Could not encode command"
             return 0
         }
-        if trackAck, let label { pendingCommands[frameSequence] = label }
         guard write(frame, to: control, on: peripheral) else { return 0 }
+        if trackAck, let label { pendingCommands[frameSequence] = (label: label, type: type) }
         return frameSequence
     }
 
@@ -356,9 +396,14 @@ enum BikeOSBLEFragment {
     private func handleAcknowledgement(_ frame: BikeOSFrame) {
         guard let acknowledgement = BikeOSAcknowledgement.decode(frame) else { return }
 
-        if frame.transferID == 0, pendingCommands.removeValue(forKey: frame.sequence) != nil {
+        if frame.transferID == 0, let command = pendingCommands.removeValue(forKey: frame.sequence) {
+            if pendingNavigationCommand == command.type {
+                pendingNavigationCommand = nil
+                commandTimeoutTask?.cancel()
+                commandTimeoutTask = nil
+            }
             if acknowledgement.result == .ok || acknowledgement.result == .accepted {
-                lastAck = acknowledgement.result == .accepted ? "Command accepted" : "Command completed"
+                lastAck = acknowledgement.result == .accepted ? "\(command.label) accepted" : "\(command.label) completed"
             } else {
                 lastAck = "ESP32 rejected command: \(acknowledgement.result.label)"
             }
@@ -402,6 +447,11 @@ enum BikeOSBLEFragment {
         guard newStatus.gpsValid else { return }
 
         let target = newStatus.coordinate
+        if newStatus.runState != .running {
+            interpolationTask?.cancel()
+            if liveCoordinate == nil { liveCoordinate = target }
+            return
+        }
         let start = liveCoordinate ?? target
         interpolationTask?.cancel()
         interpolationTask = Task { [weak self] in
@@ -463,6 +513,9 @@ extension BikeOSBluetooth: CBCentralManagerDelegate {
             self.ackNotifyReady = false
             self.statusNotifyReady = false
             self.pendingCommands.removeAll()
+            self.pendingNavigationCommand = nil
+            self.commandTimeoutTask?.cancel()
+            self.commandTimeoutTask = nil
             self.writeQueue.removeAll()
             self.responseWriteInFlight = false
             self.phase = .idle
@@ -564,5 +617,9 @@ extension BikeOSBluetooth: CBPeripheralDelegate {
             }
             self.pumpWrites()
         }
+    }
+
+    nonisolated func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
+        Task { @MainActor in self.pumpWrites() }
     }
 }

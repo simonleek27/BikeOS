@@ -2,16 +2,18 @@
 
 ## Read this first
 
-The navigation stack, redesigned 128×64 interface, physical ESP32 runtime, and
-the first physical iPhone↔ESP32 BLE path are integrated. The current branch
-finishes the route-model/UI and ACK-driven transfer work; the remaining checks
-are physical transfer capture, LCD wiring, and GPS hardware.
+The navigation stack, physical ESP32 runtime, ILI9341 renderer, and the first
+physical iPhone↔ESP32 BLE path are integrated. The current branch adds the
+map-first iPhone planner/navigation UI, authoritative run-state telemetry,
+low-MTU BLE fragmentation, and route-only custom BRTE transfer; remaining checks
+are physical transfer capture, disconnect/reconnect observation, and GPS
+hardware.
 
 Repository state at handoff:
 
 - Branch: `codex/end-to-end-integration`
 - Working tree: integration changes pending commit
-- ESP firmware: BikeOS 0.2.0
+- ESP firmware: BikeOS 0.5.0
 - Toolchain: ESP-IDF 5.5.6
 - Host build: CMake + C++20 + SDL2 + zlib
 - Physical board: ESP32-S3 rev 0.2, 16 MB flash, 8 MB PSRAM
@@ -41,7 +43,10 @@ Recent logical commits:
   simulated route, entered `REROUTING` after a 50 m deviation, recovered from
   `GPS_LOST`, reached `ARRIVED`, and kept stable free heap.
 - Host tests pass, including decoding and rendering the checked-in Amsterdam
-  dataset. ESP-IDF firmware builds and flashes successfully.
+  dataset. The previous ESP-IDF image flashed and was serial-verified.
+- The new 0.5.0 firmware builds successfully, but the latest flash attempt
+  received no serial data from `/dev/cu.usbmodem1101`; repeat after a BOOT/RESET
+  sequence or USB reconnect before claiming the new image is on the board.
 
 ## What is not complete
 
@@ -50,9 +55,9 @@ Recent logical commits:
 - BLE route/map transfer is implemented with begin/chunk/commit ACK pacing and
   route-ID activation verification; repeat on the physical setup for captured
   serial evidence.
-- The iPhone app is implemented for the bundled route: BRTE decode, full map,
-  maneuver list, live status marker, and transfer progress. GraphHopper parsing
-  is present but requires a local API key.
+- The iPhone app has a route planner: MapKit destination/start search,
+  GraphHopper bicycle routing, route preview/maneuvers, BRTE encoding, and
+  route-only transfer. GraphHopper still requires a local API key.
 - No outdoor road test has happened.
 
 Do not describe the LCD as physically integrated; its panel is still unwired.

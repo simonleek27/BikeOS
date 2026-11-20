@@ -74,6 +74,14 @@ enum class NavigationState : std::uint8_t {
     error = 8,
 };
 
+enum class RunState : std::uint8_t {
+    not_started = 0,
+    running = 1,
+    paused = 2,
+    stopped = 3,
+    arrived = 4,
+};
+
 enum class GpsSource : std::uint8_t {
     none = 0,
     simulated = 1,
@@ -152,7 +160,8 @@ struct Status {
     std::uint16_t heading_deg_cdeg{};
     std::uint16_t speed_cms{};
     std::uint16_t matched_point_index{};
-    std::uint16_t reserved{};
+    RunState run_state{RunState::not_started};
+    std::uint8_t reserved{};
 };
 
 std::uint32_t crc32(std::span<const std::uint8_t> data);

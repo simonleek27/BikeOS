@@ -44,7 +44,7 @@ constexpr Palette kDay{
     rgb565(0x6B, 0x72, 0x80), rgb565(0x1F, 0x29, 0x37), rgb565(0xA8, 0xAD, 0xB5),
     rgb565(0xFD, 0xE7, 0xB0), rgb565(0xE0, 0xA5, 0x26), rgb565(0x5C, 0x3B, 0x00),
     rgb565(0xFB, 0xD0, 0xD0), rgb565(0xD9, 0x53, 0x4F), rgb565(0x6B, 0x11, 0x11),
-    rgb565(0x16, 0xA3, 0x4A), rgb565(0xDC, 0x26, 0x26), rgb565(0x9C, 0xA3, 0xAF),
+    rgb565(0x16, 0xA3, 0x4A), rgb565(0xDC, 0x26, 0x26), rgb565(0xF5, 0x9E, 0x0B),
     rgb565(0x25, 0x63, 0xEB), rgb565(0x9C, 0xA3, 0xAF),
 };
 
@@ -59,7 +59,7 @@ constexpr Palette kNight{
     rgb565(0x4A, 0x33, 0x00), rgb565(0xB7, 0x79, 0x1F), rgb565(0xFF, 0xD2, 0x7A),
     rgb565(0x4A, 0x14, 0x14), rgb565(0xC5, 0x30, 0x30), rgb565(0xFF, 0xB4, 0xB4),
     rgb565(0x4A, 0xDE, 0x80), rgb565(0xF8, 0x71, 0x71), rgb565(0x59, 0x62, 0x6D),
-    rgb565(0x60, 0xA5, 0xFA), rgb565(0x59, 0x62, 0x6D),
+    rgb565(0x60, 0xA5, 0xFA), rgb565(0xF5, 0xA6, 0x23),
 };
 
 std::int64_t floor_div(const std::int64_t value, const std::int64_t divisor)
@@ -471,7 +471,8 @@ void ColorMapRenderer::render(Canvas565& canvas,
     const Palette& p = night ? kNight : kDay;
 
     // Zoom: fixed while cruising, closer in the last stretch before a turn.
-    const bool guiding = state == NavigationState::navigating || state == NavigationState::phone_disconnected;
+    const bool guiding = navigation.run_state == NavigationRunState::running &&
+                         (state == NavigationState::navigating || state == NavigationState::phone_disconnected);
     const float target = guiding && navigation.next_maneuver &&
                                  navigation.distance_to_maneuver_m <= turn_zoom_distance_m
                              ? turn_meters_per_pixel
@@ -665,7 +666,22 @@ void ColorMapRenderer::render(Canvas565& canvas,
             card.icon = fallback;
         }
     };
-    switch (state) {
+    if (navigation.run_state == NavigationRunState::paused) {
+        card.style = amber;
+        card.icon = Card::Icon::pin;
+        card.title = "Paused";
+        card.subtitle = "Press play on your phone";
+    } else if (navigation.run_state == NavigationRunState::stopped) {
+        card.style = neutral;
+        card.icon = Card::Icon::pin;
+        card.title = "Ride stopped";
+        card.subtitle = "Press start on your phone";
+    } else if (navigation.run_state == NavigationRunState::not_started && has_route) {
+        card.style = neutral;
+        card.icon = Card::Icon::pin;
+        card.title = "Ready to ride";
+        card.subtitle = "Press start on your phone";
+    } else switch (state) {
     case NavigationState::navigating:
     case NavigationState::phone_disconnected:
         if (navigation.next_maneuver) {
@@ -752,7 +768,7 @@ void ColorMapRenderer::render(Canvas565& canvas,
     const bool time_known = input.utc_epoch_ms != 0;
     const std::string clock = time_known ? clock_text(amsterdam_local_ms(input.utc_epoch_ms)) : "--:--";
     const int clock_width = text_width(font_title, clock);
-    const int chip_width = 10 + clock_width + 10 + 8 + 7 + 9 + 10;
+    const int chip_width = 10 + clock_width + 10 + 8 + 20 + 7 + 26 + 10;
     const Rect chip{width - 6 - chip_width, 6, chip_width, 24};
     const bool show_eta = has_route && state != NavigationState::destination_reached &&
                           state != NavigationState::waiting_for_gps && navigation.route_remaining_m > 0.0F;
@@ -896,7 +912,10 @@ void ColorMapRenderer::render(Canvas565& canvas,
                                     : state == NavigationState::gps_lost ? p.gps_lost
                                                                          : p.gps_none;
     canvas.fill_circle({static_cast<float>(dot_x), static_cast<float>(chip.y + 12)}, 4.0F, gps_color);
-    draw_phone_glyph(canvas, dot_x + 4 + 7, chip.y + 5, navigation.phone_connected ? p.phone_on : p.phone_off);
+    canvas.draw_text(font_small, dot_x + 9, chip.y + 16, "GPS", gps_color);
+    const int phone_x = dot_x + 9 + text_width(font_small, "GPS") + 6;
+    draw_phone_glyph(canvas, phone_x, chip.y + 5, navigation.phone_connected ? p.phone_on : p.phone_off);
+    canvas.draw_text(font_small, phone_x + 16, chip.y + 16, "BT", navigation.phone_connected ? p.phone_on : p.phone_off);
     if (show_eta) {
         canvas.fill_round_rect(eta_chip.x, eta_chip.y, eta_chip.width, eta_chip.height, 10, p.card);
         canvas.stroke_round_rect(eta_chip.x, eta_chip.y, eta_chip.width, eta_chip.height, 10, p.card_border);
