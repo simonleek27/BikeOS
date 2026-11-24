@@ -89,13 +89,18 @@ bool MapDataset::valid() const
 
 std::uint32_t crc32(const std::span<const std::uint8_t> data)
 {
-    std::uint32_t crc = 0xFFFFFFFFU;
-    for (const std::uint8_t byte : data) {
-        crc ^= byte;
-        for (int bit = 0; bit < 8; ++bit) {
-            crc = (crc >> 1U) ^ (0xEDB88320U & (0U - (crc & 1U)));
+    // Table-driven; tiles are CRC-checked every time the rider crosses a tile edge.
+    static constexpr auto table = [] {
+        std::array<std::uint32_t, 256> entries{};
+        for (std::uint32_t i = 0; i < 256; ++i) {
+            std::uint32_t crc = i;
+            for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1U) ^ (0xEDB88320U & (0U - (crc & 1U)));
+            entries[i] = crc;
         }
-    }
+        return entries;
+    }();
+    std::uint32_t crc = 0xFFFFFFFFU;
+    for (const std::uint8_t byte : data) crc = (crc >> 8U) ^ table[(crc ^ byte) & 0xFFU];
     return ~crc;
 }
 

@@ -18,13 +18,14 @@ idf_component_register(
         "../../core/src/gps.cpp"
         "../../core/src/gps_simulator.cpp"
         "../../core/src/map_data.cpp"
+        "../../core/src/map_tiles.cpp"
         "../../core/src/map_renderer.cpp"
         "../../core/src/navigation.cpp"
         "../../core/src/nmea.cpp"
         "../../core/src/route_data.cpp"
         "../../protocol/src/protocol.cpp"
     INCLUDE_DIRS "." "../../core/include" "../../protocol/include"
-    REQUIRES bt nvs_flash esp_app_format esp_driver_gpio esp_driver_spi esp_driver_uart esp_psram esp_system esp_timer heap spi_flash
+    REQUIRES bt esp_partition nvs_flash esp_app_format esp_driver_gpio esp_driver_spi esp_driver_uart esp_psram esp_system esp_timer heap spi_flash
 )
 
 target_add_binary_data(${COMPONENT_LIB}

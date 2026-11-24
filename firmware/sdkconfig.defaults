@@ -45,3 +45,9 @@ CONFIG_COMPILER_OPTIMIZATION_PERF=y
 CONFIG_BIKEOS_GPS_SIM=y
 # CONFIG_BIKEOS_GPS_UART is not set
 # CONFIG_BIKEOS_GPS_IPHONE is not set
+
+# Custom partition table: 4 MB app plus a 12 MB "map" data partition for the
+# tiled city map (see partitions.csv and README.md).
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"

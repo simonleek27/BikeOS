@@ -44,6 +44,23 @@ PLACES = [
     {"name": "Demo start (Overtoom)", "lat": osm.START[0], "lon": osm.START[1]},
     {"name": "Demo destination", "lat": osm.DESTINATION[0], "lon": osm.DESTINATION[1]},
 ]
+# Further afield; these need the city tiles (data/amsterdam.btil) and the
+# city-wide street graph the tile tool saves (see ROUTING_SOURCES).
+CITY_PLACES = [
+    {"name": "Amsterdam Centraal", "lat": 52.37840, "lon": 4.90020},
+    {"name": "Dam Square", "lat": 52.37310, "lon": 4.89270},
+    {"name": "Westerpark", "lat": 52.38720, "lon": 4.87420},
+    {"name": "Oosterpark", "lat": 52.36050, "lon": 4.92070},
+    {"name": "Artis Zoo", "lat": 52.36620, "lon": 4.91630},
+    {"name": "Amstel Station", "lat": 52.34690, "lon": 4.91790},
+    {"name": "Sloterplas", "lat": 52.36500, "lon": 4.81500},
+    {"name": "Amsterdamse Bos", "lat": 52.32900, "lon": 4.84500},
+    {"name": "NDSM Wharf", "lat": 52.40110, "lon": 4.89160},
+    {"name": "Zuidas (Station Zuid)", "lat": 52.33890, "lon": 4.87300},
+]
+# Street graphs for routing, best first: the whole city (written by
+# `tools/build_city_tiles.py --save-highways`), else the demo area.
+ROUTING_SOURCES = ("osm_highways_amsterdam.json", "osm_highways.json")
 # Where the phone thinks it is when "Current location" is selected.
 CURRENT_LOCATION = {"lat": osm.START[0], "lon": osm.START[1]}
 
@@ -98,10 +115,11 @@ class Router:
     def _load_roads(self):
         if self.roads is not None:
             return self.roads
-        cache = CACHE / "osm_highways.json"
-        if cache.exists():
+        cache = next((CACHE / name for name in ROUTING_SOURCES if (CACHE / name).exists()), None)
+        if cache is not None:
             data = json.loads(cache.read_text())
         else:
+            cache = CACHE / "osm_highways.json"
             CACHE.mkdir(exist_ok=True)
             data = osm.fetch_osm()  # one Overpass request, then cached
             cache.write_text(json.dumps(data, separators=(",", ":")))
@@ -111,7 +129,13 @@ class Router:
     def route(self, start, destination) -> dict:
         with self.lock:
             roads = self._load_roads()
-            points, streets = osm.build_route(roads, tuple(start), tuple(destination))
+            # Only the streets near the trip, so routing across the city stays quick.
+            margin = 0.02
+            south, north = min(start[0], destination[0]) - margin, max(start[0], destination[0]) + margin
+            west, east = min(start[1], destination[1]) - margin * 1.6, max(start[1], destination[1]) + margin * 1.6
+            nearby = [road for road in roads
+                      if any(south <= lat <= north and west <= lon <= east for lat, lon in road["points"])]
+            points, streets = osm.build_route(nearby, tuple(start), tuple(destination))
             maneuvers = osm.route_maneuvers(points, streets)
             route_id = 0xB1000000 | next(self.ids)
             data = osm.encode_route(points, maneuvers, route_id)
@@ -175,7 +199,8 @@ class Handler(BaseHTTPRequestHandler):
                 Handler.map_cache = json.dumps(self.engine.call("map")[0]).encode()
             return self._send(Handler.map_cache, "application/json")
         if url.path == "/api/places":
-            return self._json({"places": PLACES, "current": CURRENT_LOCATION})
+            city = (ROOT / "data" / "amsterdam.btil").exists()
+            return self._json({"places": PLACES + (CITY_PLACES if city else []), "current": CURRENT_LOCATION})
         self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
     def do_POST(self):

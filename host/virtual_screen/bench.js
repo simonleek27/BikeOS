@@ -62,6 +62,9 @@ function updateStatus(next) {
   $("r-fps").textContent = `${fps.toFixed(1)} fps`;
   $("r-render").textContent = `render ${next.render_ms.toFixed(1)} ms (host)`;
   $("r-zoom").textContent = `${next.zoom.toFixed(2)} m/px`;
+  $("r-map").textContent = next.map_source === "city tiles"
+    ? `city tiles: ${next.tiles_loaded} loaded, ${next.map_roads} roads, last load ${next.tile_load_ms.toFixed(1)} ms`
+    : `${next.map_source}: ${next.map_roads} roads`;
 
   const slider = $("progress");
   slider.max = Math.round(next.total);

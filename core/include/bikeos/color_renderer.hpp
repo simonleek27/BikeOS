@@ -77,6 +77,7 @@ private:
     // Bounding circles per road and area, rebuilt when the map changes, so
     // off-screen features are skipped before any projection work.
     const MapDataset* bounds_map_{};
+    std::uint32_t bounds_revision_{};
     std::size_t bounds_roads_{};
     std::size_t bounds_areas_{};
     std::vector<Bounds> road_bounds_;

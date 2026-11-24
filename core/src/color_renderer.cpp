@@ -358,7 +358,10 @@ void extend_bounds(const Points& points, std::int64_t& min_lat, std::int64_t& ma
 
 void ColorMapRenderer::update_bounds(const MapDataset& map)
 {
-    if (bounds_map_ == &map && bounds_roads_ == map.roads.size() && bounds_areas_ == map.areas.size()) return;
+    if (bounds_map_ == &map && bounds_revision_ == map.revision && bounds_roads_ == map.roads.size() &&
+        bounds_areas_ == map.areas.size()) {
+        return;
+    }
     const auto circle = [](const std::int64_t min_lat, const std::int64_t max_lat, const std::int64_t min_lon,
                            const std::int64_t max_lon) {
         const GeoPointE7 centre{static_cast<std::int32_t>((min_lat + max_lat) / 2),
@@ -383,6 +386,7 @@ void ColorMapRenderer::update_bounds(const MapDataset& map)
         area_bounds_.push_back(circle(min_lat, max_lat, min_lon, max_lon));
     }
     bounds_map_ = &map;
+    bounds_revision_ = map.revision;
     bounds_roads_ = map.roads.size();
     bounds_areas_ = map.areas.size();
 }
@@ -822,8 +826,9 @@ void ColorMapRenderer::render(Canvas565& canvas,
             candidates.push_back({road.road->name, {(a.x + b.x) * 0.5F, (a.y + b.y) * 0.5F}, length, false});
         }
     }
-    for (const auto& area : map.areas) {
-        if (area.area_class != AreaClass::water || area.name.empty()) continue;
+    for (std::size_t index = 0; index < map.areas.size(); ++index) {
+        const auto& area = map.areas[index];
+        if (area.area_class != AreaClass::water || area.name.empty() || !in_view(area_bounds_[index])) continue;
         float sum_x = 0.0F, sum_y = 0.0F;
         int count = 0;
         for (const auto point : area.rings.front()) {
