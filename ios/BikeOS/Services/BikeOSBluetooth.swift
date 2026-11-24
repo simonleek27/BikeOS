@@ -70,6 +70,8 @@ enum BikeOSBLEFragment {
     @Published private(set) var liveCoordinate: CLLocationCoordinate2D?
     @Published private(set) var liveHeading: Double?
     @Published private(set) var pendingNavigationCommand: BikeOSMessageType?
+    @Published private(set) var activeRouteID: UInt32?
+    @Published private(set) var transferringRouteID: UInt32?
 
     private enum TransferPhase { case idle, waitingForBeginAck, sending, verifying, activated, failed }
     private var phase: TransferPhase = .idle
@@ -109,6 +111,11 @@ enum BikeOSBLEFragment {
     var isBluetoothConnected: Bool { peripheral?.state == .connected }
     var isReadyForTransfer: Bool { connectionState == .readyForTransfer }
     var isConnected: Bool { isReadyForTransfer }
+    var isTransferringRoute: Bool { transferringRouteID != nil }
+
+    func routeIsActive(_ route: BikeOSRoutePlan) -> Bool {
+        activeRouteID == route.routeID || status?.routeID == route.routeID
+    }
 
     func connect() {
         guard central.state == .poweredOn else {
@@ -152,6 +159,10 @@ enum BikeOSBLEFragment {
             lastAck = "Connect to BikeOS and wait until it is Ready"
             return
         }
+        guard !isTransferringRoute else {
+            lastAck = "A route is already being transferred — wait for activation"
+            return
+        }
         do {
             let routeBytes = try BikeOSRouteEncoder.encode(route)
             beginTransfer(route: route, map: Data(), routeBytes: routeBytes, displayName: route.name)
@@ -166,6 +177,8 @@ enum BikeOSBLEFragment {
                                displayName: String) {
         bundleID = UInt32(Date().timeIntervalSince1970) ^ 0xB1CE_0005
         routeID = decodedRoute.routeID
+        activeRouteID = nil
+        transferringRouteID = routeID
         transferID = bundleID
         transferBytes = map + route
         nextOffset = 0
@@ -182,7 +195,12 @@ enum BikeOSBLEFragment {
         begin.appendLE(BikeOSFrame.crc32(route))
         begin.appendLE(BikeOSFrame.crc32(transferBytes))
         lastAck = "Preparing \(displayName) (0%)"
-        sendControl(type: .transferBegin, payload: begin, transferID: transferID, trackAck: false)
+        guard sendControl(type: .transferBegin, payload: begin, transferID: transferID, trackAck: false) != 0 else {
+            phase = .failed
+            transferringRouteID = nil
+            lastAck = "Could not start route transfer — reconnect and try again"
+            return
+        }
         armTransferTimeout()
     }
 
@@ -235,6 +253,7 @@ enum BikeOSBLEFragment {
                                 payload: chunk).encoded()
         guard !frame.isEmpty else {
             phase = .failed
+            transferringRouteID = nil
             lastAck = "Could not encode route chunk"
             return
         }
@@ -347,6 +366,7 @@ enum BikeOSBLEFragment {
         writeQueue.removeAll()
         responseWriteInFlight = false
         phase = .failed
+        transferringRouteID = nil
         lastAck = "BLE frame \(frame.count) B exceeds write limits (response \(responseLimit), no-response \(noResponseLimit)); properties=\(propertiesDescription(properties)); firmware=\(firmwareInfo.isEmpty ? "unknown" : firmwareInfo)"
         clearTransferTimeout()
     }
@@ -366,6 +386,7 @@ enum BikeOSBLEFragment {
             guard !Task.isCancelled, let self else { return }
             guard self.phase == .waitingForBeginAck || self.phase == .sending || self.phase == .verifying else { return }
             self.phase = .failed
+            self.transferringRouteID = nil
             self.lastAck = "Route transfer timed out — reconnect and try again"
         }
     }
@@ -421,6 +442,7 @@ enum BikeOSBLEFragment {
                   acknowledgement.nextOffset >= UInt32(nextOffset),
                   acknowledgement.nextOffset <= UInt32(transferBytes.count) else {
                 phase = .failed
+                transferringRouteID = nil
                 lastAck = "ESP32 rejected chunk offset"
                 clearTransferTimeout()
                 return
@@ -434,6 +456,7 @@ enum BikeOSBLEFragment {
             armTransferTimeout()
         case .waitingForBeginAck, .sending, .verifying:
             phase = .failed
+            transferringRouteID = nil
             lastAck = "ESP32 transfer error: \(acknowledgement.result.label)"
             clearTransferTimeout()
         default:
@@ -508,6 +531,8 @@ extension BikeOSBluetooth: CBCentralManagerDelegate {
             self.status = nil
             self.liveCoordinate = nil
             self.liveHeading = nil
+            self.activeRouteID = nil
+            self.transferringRouteID = nil
             self.control = nil
             self.data = nil
             self.ackNotifyReady = false
@@ -597,6 +622,8 @@ extension BikeOSBluetooth: CBPeripheralDelegate {
                     phase = .activated
                     clearTransferTimeout()
                     transferProgress = 1
+                    activeRouteID = routeID
+                    transferringRouteID = nil
                     lastAck = "Activated route \(routeID) on ESP32"
                 }
             }
@@ -610,6 +637,7 @@ extension BikeOSBluetooth: CBPeripheralDelegate {
             self.responseWriteInFlight = false
             if let error {
                 phase = .failed
+                transferringRouteID = nil
                 lastAck = "Bluetooth write failed: \(error.localizedDescription)"
                 self.writeQueue.removeAll()
                 self.clearTransferTimeout()

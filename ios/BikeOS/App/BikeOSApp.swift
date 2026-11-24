@@ -186,14 +186,24 @@ struct BikeOSHomeView: View {
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
-                Button("Navigate") { showingNavigation = true }
+                Button(bluetooth.routeIsActive(route) ? "Navigate" : "Send first") {
+                    showingNavigation = true
+                }
                     .buttonStyle(.borderedProminent).frame(minHeight: 44).contentShape(Rectangle())
+                    .disabled(!bluetooth.routeIsActive(route))
             }
             HStack(spacing: 10) {
                 Button("Send to BikeOS", systemImage: "arrow.up.circle") { bluetooth.sendRoute(route) }
                     .buttonStyle(.bordered).frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
-                    .disabled(!bluetooth.isReadyForTransfer)
+                    .disabled(!bluetooth.isReadyForTransfer || bluetooth.isTransferringRoute)
                 if let first = route.maneuvers.first { Text(first.type.label).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+            }
+            if bluetooth.isTransferringRoute {
+                ProgressView("Waiting for ESP32 to activate this route…")
+                    .font(.caption)
+            } else if !bluetooth.routeIsActive(route) {
+                Text("Send this route and wait for the activation confirmation before starting navigation.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .padding(14).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
@@ -388,7 +398,7 @@ private struct ActiveNavigationView: View {
                     switch runState { case .running: bluetooth.pauseNavigation(); case .paused: bluetooth.resumeNavigation(); case .arrived: bluetooth.restartNavigation(); case .notStarted, .stopped: bluetooth.startNavigation() }
                 } label: { Label(primaryTitle, systemImage: primarySymbol).frame(maxWidth: .infinity, minHeight: 46) }
                     .buttonStyle(.borderedProminent).contentShape(Rectangle())
-                    .disabled(!bluetooth.isReadyForTransfer || bluetooth.pendingNavigationCommand != nil)
+                    .disabled(!bluetooth.isReadyForTransfer || !bluetooth.routeIsActive(route) || bluetooth.pendingNavigationCommand != nil)
                 Menu {
                     Button("Restart from beginning", systemImage: "backward.end") { bluetooth.restartNavigation() }
                         .disabled(!bluetooth.isReadyForTransfer || bluetooth.pendingNavigationCommand != nil)
@@ -400,6 +410,10 @@ private struct ActiveNavigationView: View {
                     .buttonStyle(.bordered).contentShape(Rectangle())
             }
             if bluetooth.pendingNavigationCommand != nil { ProgressView("Waiting for ESP32…").font(.caption) }
+            if !bluetooth.routeIsActive(route) {
+                Text("This route is not active on the ESP32 yet. Return to Home, tap Send to BikeOS, and wait for activation.")
+                    .font(.caption).foregroundStyle(.orange).lineLimit(2)
+            }
             Text(bluetooth.lastAck).font(.caption).foregroundStyle(.secondary).lineLimit(1)
         }
         .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 10).background(.regularMaterial)
