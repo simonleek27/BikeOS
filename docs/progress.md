@@ -16,7 +16,7 @@ Updated: 24 November 2026
 | ILI9341 SPI driver | Complete | 320×240 landscape RGB565 driver initialized at 26 MHz on the physical board |
 | TFT wiring | Verified for current module | CS 10, RESET 4, DC 5, MOSI 11, SCK 12; power safety remains documented |
 | BLE route transfer | Implemented and tested | ACK-paced transfer, 20/23/244/247-byte ATT fragmentation, strict reassembly, route-only bundles, transfer diagnostics, and activated-route verification |
-| iPhone app | Navigation/planner redesign implemented | Compact map-first navigation layout, authoritative run-state controls, robust hit targets, real destination search, GraphHopper bicycle routing, route preview, and custom BRTE upload |
+| iPhone app | Navigation/planner redesign implemented | Compact map-first navigation layout, authoritative run-state controls, robust hit targets, real destination search, GraphHopper bicycle routing, route preview, custom BRTE upload, and active-route gating |
 | Indoor simulator controls | Complete | Deterministic 4.5 m/s simulator starts only after Start, pauses at the exact position with speed 0, resumes, restarts, stops, and reports run state over BLE |
 
 ## Current assessment
@@ -26,6 +26,9 @@ local Xcode configuration. A literal `https://` in an `.xcconfig` was previously
 parsed as a comment and became `https:`, which made MapKit search work while
 route calculation failed. The planner also no longer hides routing errors behind
 the bundled demo route and starts iPhone location updates when Home appears.
+Navigation controls now remain disabled until the ESP32 status stream reports the
+same route ID that the phone previewed; this prevents a failed or incomplete
+custom transfer from accidentally starting the bundled demo route.
 
 The data pipeline, navigation behavior, shared RGB565 renderer, virtual bench,
 physical ESP execution, ILI9341 driver, and first real iPhone↔ESP32 BLE
