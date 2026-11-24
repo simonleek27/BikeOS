@@ -23,3 +23,4 @@ firmware/sdkconfig.pre_ble
 # Screen test bench caches (OSM street graph, routes built in the bench)
 host/virtual_screen/.cache/
 __pycache__/
+host/virtual_screen/.venv/

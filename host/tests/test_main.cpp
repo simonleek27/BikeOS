@@ -565,6 +565,22 @@ void test_color_renderer()
     CHECK(renderer.meters_per_pixel() < 1.0F);
     CHECK(canvas.pixel(card.x + card.width / 2, card.y + 3) == bikeos::rgb565(0x1F, 0x24, 0x2B));  // night, no clock
 
+    // The card must end before the status chip, and the chip must stay on
+    // screen, for every card state (the chip is sized from measured text).
+    for (const auto run : {bikeos::NavigationRunState::not_started, bikeos::NavigationRunState::running,
+                           bikeos::NavigationRunState::paused, bikeos::NavigationRunState::stopped}) {
+        for (const std::int64_t epoch : {0LL, 1795091400000LL}) {
+            auto snapshot = nav;
+            snapshot.run_state = run;
+            bikeos::ColorMapRenderer layout;
+            layout.render(canvas, map, route.points, snapshot, {.utc_epoch_ms = epoch});
+            const auto card_box = layout.card_rect();
+            const auto chip_box = layout.chip_rect();
+            CHECK(card_box.x + card_box.width + 6 <= chip_box.x);
+            CHECK(chip_box.x + chip_box.width <= canvas.width() - 6);
+        }
+    }
+
     bikeos::NavigationEngine lost;
     CHECK(lost.set_route(route));
     lost.update(fix_at(offset(route.points.front(), 0, 30), 1000), true, 1000);

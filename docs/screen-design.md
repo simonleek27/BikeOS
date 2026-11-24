@@ -25,8 +25,10 @@ Landscape, 320×240, map first.
   turn arrow on the left, large distance, the street being turned onto, and a
   "then left in 120 m" line when the following maneuver is within 250 m
   (the card grows to fit that line).
-- **Status chips** float top-right: clock with a GPS dot and phone glyph, and
-  under it an ETA chip while navigating.
+- **Status chips** float top-right, stacked and right-aligned: the clock, a
+  small `● GPS ▯ BT` chip under it, and an ETA chip while navigating. Each is
+  sized from its measured text, and the card is capped to end 6 px before the
+  widest chip, so a long clock or label can never push into the card.
 
 ## Map
 

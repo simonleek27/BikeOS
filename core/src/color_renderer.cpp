@@ -740,36 +740,23 @@ void ColorMapRenderer::render(Canvas565& canvas,
         break;
     }
 
-    constexpr int card_x = 6;
-    constexpr int card_y = 6;
-    constexpr int max_card_width = 204;  // leaves a gap before the clock chip
-    const Font* title_font = &font_title;
-    std::vector<std::string> subtitle_lines;
-    int card_width = 150;
-    int card_height = 0;
-    if (card.maneuver_layout) {
-        const int distance_width = text_width(font_distance, card.distance_number) + 4 +
-                                   text_width(font_title, card.distance_unit);
-        card_width = std::clamp(std::max(62 + distance_width + 12, text_width(font_title, card.title) + 24),
-                                150, max_card_width);
-        card_height = card.then_line.empty() ? 76 : 92;
-    } else {
-        constexpr int text_room = max_card_width - 52 - 10;
-        if (text_width(font_heading, card.title) <= text_room) title_font = &font_heading;
-        subtitle_lines = wrap_text(font_small, card.subtitle, text_room);
-        int text = text_width(*title_font, card.title);
-        for (const auto& line : subtitle_lines) text = std::max(text, text_width(font_small, line));
-        card_width = std::clamp(52 + text + 12, 150, max_card_width);
-        card_height = 10 + title_font->ascent + static_cast<int>(subtitle_lines.size()) * 15 + 10;
-    }
-    card_ = {card_x, card_y, card_width, card_height};
-
-    // Chips, also before labels.
+    // Right-hand chips first, stacked: clock, then "GPS"/"BT" status, then ETA.
+    // Each is right-aligned and sized from its measured text; the card is then
+    // sized to end before the widest of them.
+    constexpr int chip_pad = 9;
+    constexpr int chip_gap = 8;
+    constexpr int dot_diameter = 8;
+    constexpr int phone_width = 9;
+    constexpr int label_gap = 3;
     const bool time_known = input.utc_epoch_ms != 0;
     const std::string clock = time_known ? clock_text(amsterdam_local_ms(input.utc_epoch_ms)) : "--:--";
     const int clock_width = text_width(font_title, clock);
-    const int chip_width = 10 + clock_width + 10 + 8 + 20 + 7 + 26 + 10;
-    const Rect chip{width - 6 - chip_width, 6, chip_width, 24};
+    const Rect chip{width - 6 - (chip_pad + clock_width + chip_pad), 6, chip_pad + clock_width + chip_pad, 24};
+    const int gps_label_width = text_width(font_label, "GPS");
+    const int bt_label_width = text_width(font_label, "BT");
+    const int status_width = chip_pad + dot_diameter + label_gap + gps_label_width + chip_gap + phone_width +
+                             label_gap + bt_label_width + chip_pad;
+    const Rect status_chip{width - 6 - status_width, chip.y + chip.height + 4, status_width, 20};
     const bool show_eta = has_route && state != NavigationState::destination_reached &&
                           state != NavigationState::waiting_for_gps && navigation.route_remaining_m > 0.0F;
     std::string eta_text;
@@ -782,10 +769,40 @@ void ColorMapRenderer::render(Canvas565& canvas,
         }
     }
     const int eta_width = show_eta ? text_width(font_small, eta_text) + 20 : 0;
-    const Rect eta_chip{width - 6 - eta_width, 34, eta_width, 20};
+    const Rect eta_chip{width - 6 - eta_width, status_chip.y + status_chip.height + 4, eta_width, 20};
+    int chips_left = std::min(chip.x, status_chip.x);
+    if (show_eta) chips_left = std::min(chips_left, eta_chip.x);
+
+    constexpr int card_x = 6;
+    constexpr int card_y = 6;
+    // Keep a 6 px gap before the chips, whatever their text measures.
+    const int max_card_width = std::max(150, chips_left - 6 - card_x);
+    const Font* title_font = &font_title;
+    std::vector<std::string> subtitle_lines;
+    int card_width = 150;
+    int card_height = 0;
+    if (card.maneuver_layout) {
+        const int distance_width = text_width(font_distance, card.distance_number) + 4 +
+                                   text_width(font_title, card.distance_unit);
+        card_width = std::clamp(std::max(62 + distance_width + 12, text_width(font_title, card.title) + 24),
+                                150, max_card_width);
+        card_height = card.then_line.empty() ? 76 : 92;
+    } else {
+        const int text_room = max_card_width - 52 - 10;
+        if (text_width(font_heading, card.title) <= text_room) title_font = &font_heading;
+        subtitle_lines = wrap_text(font_small, card.subtitle, text_room);
+        int text = text_width(*title_font, card.title);
+        for (const auto& line : subtitle_lines) text = std::max(text, text_width(font_small, line));
+        card_width = std::clamp(52 + text + 12, 150, max_card_width);
+        card_height = 10 + title_font->ascent + static_cast<int>(subtitle_lines.size()) * 15 + 10;
+    }
+    card_ = {card_x, card_y, card_width, card_height};
+    chip_ = {chips_left, chip.y, width - 6 - chips_left,
+             (show_eta ? eta_chip.y + eta_chip.height : status_chip.y + status_chip.height) - chip.y};
+
 
     // Labels: major streets and named water, never under the card, chips or rider.
-    std::vector<Rect> occupied{card_, chip, Rect{rider_x - 18, rider_y - 18, 36, 36}};
+    std::vector<Rect> occupied{card_, chip, status_chip, Rect{rider_x - 18, rider_y - 18, 36, 36}};
     if (show_eta) occupied.push_back(eta_chip);
     struct Candidate {
         std::string_view name;
@@ -906,16 +923,22 @@ void ColorMapRenderer::render(Canvas565& canvas,
     // Status chips.
     canvas.fill_round_rect(chip.x, chip.y, chip.width, chip.height, 12, p.card);
     canvas.stroke_round_rect(chip.x, chip.y, chip.width, chip.height, 12, p.card_border);
-    canvas.draw_text(font_title, chip.x + 10, chip.y + 17, clock, time_known ? p.text : p.muted);
-    const int dot_x = chip.x + 10 + clock_width + 10 + 4;
+    canvas.draw_text(font_title, chip.x + chip_pad, chip.y + 17, clock, time_known ? p.text : p.muted);
+    canvas.fill_round_rect(status_chip.x, status_chip.y, status_chip.width, status_chip.height, 10, p.card);
+    canvas.stroke_round_rect(status_chip.x, status_chip.y, status_chip.width, status_chip.height, 10, p.card_border);
+    int pen = status_chip.x + chip_pad;
     const std::uint16_t gps_color = navigation.gps_valid                  ? p.gps_ok
                                     : state == NavigationState::gps_lost ? p.gps_lost
                                                                          : p.gps_none;
-    canvas.fill_circle({static_cast<float>(dot_x), static_cast<float>(chip.y + 12)}, 4.0F, gps_color);
-    canvas.draw_text(font_small, dot_x + 9, chip.y + 16, "GPS", gps_color);
-    const int phone_x = dot_x + 9 + text_width(font_small, "GPS") + 6;
-    draw_phone_glyph(canvas, phone_x, chip.y + 5, navigation.phone_connected ? p.phone_on : p.phone_off);
-    canvas.draw_text(font_small, phone_x + 16, chip.y + 16, "BT", navigation.phone_connected ? p.phone_on : p.phone_off);
+    canvas.fill_circle({static_cast<float>(pen + dot_diameter / 2), static_cast<float>(status_chip.y + 10)},
+                       dot_diameter / 2.0F, gps_color);
+    pen += dot_diameter + label_gap;
+    canvas.draw_text(font_label, pen, status_chip.y + 14, "GPS", gps_color);
+    pen += gps_label_width + chip_gap;
+    const std::uint16_t phone_color = navigation.phone_connected ? p.phone_on : p.phone_off;
+    draw_phone_glyph(canvas, pen, status_chip.y + 3, phone_color);
+    pen += phone_width + label_gap;
+    canvas.draw_text(font_label, pen, status_chip.y + 14, "BT", phone_color);
     if (show_eta) {
         canvas.fill_round_rect(eta_chip.x, eta_chip.y, eta_chip.width, eta_chip.height, 10, p.card);
         canvas.stroke_round_rect(eta_chip.x, eta_chip.y, eta_chip.width, eta_chip.height, 10, p.card_border);

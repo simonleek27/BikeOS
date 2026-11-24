@@ -31,10 +31,21 @@ real `ColorMapRenderer`, `NavigationEngine` and `GpsFilter` in
 second, display frames at about 7 fps with the rider gliding between fixes.
 The screen shows the exact RGB565 buffer the TFT driver sends to the panel.
 
+It opens in its own window (pywebview, WebKit):
+
 ```sh
-cmake --build build-host --target bikeos_virtual_screen
-python3 host/virtual_screen/server.py   # http://localhost:8765
+host/virtual_screen/bench.sh
 ```
+
+or double-click `host/virtual_screen/BikeOS Bench.app`. The first run creates
+`host/virtual_screen/.venv` with pywebview; every run rebuilds
+`bikeos_virtual_screen` if its C++ sources changed. Because the repo is under
+`~/Documents`, macOS asks once whether BikeOS Bench may access the Documents
+folder; allow it (System Settings → Privacy & Security → Files and Folders).
+Output from the app goes to `~/Library/Logs/BikeOS Bench.log`.
+
+To use a browser instead: `python3 host/virtual_screen/server.py`, then open
+http://localhost:8765.
 
 Around the screen: a route-progress slider with jumps to each turn, an
 auto-follow toggle and speed, and switches for GPS signal, phone connection,

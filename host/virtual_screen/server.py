@@ -211,17 +211,39 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
 
+DEFAULT_ENGINE = ROOT / "build-host" / "bikeos_virtual_screen"
+
+
+def create_server(port: int = 8765, engine: pathlib.Path = DEFAULT_ENGINE) -> ThreadingHTTPServer:
+    """Starts the engine process and returns an HTTP server bound to localhost.
+
+    Port 0 picks a free port; read it back from server.server_address.
+    """
+    if not engine.exists():
+        raise FileNotFoundError(
+            f"{engine} not found; build it with: cmake --build build-host --target bikeos_virtual_screen")
+    Handler.engine = Engine(engine)
+    Handler.router = Router()
+    Handler.map_cache = None
+    return ThreadingHTTPServer(("127.0.0.1", port), Handler)
+
+
+def shutdown(server: ThreadingHTTPServer) -> None:
+    server.shutdown()
+    server.server_close()
+    Handler.engine.process.terminate()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--engine", type=pathlib.Path, default=ROOT / "build-host" / "bikeos_virtual_screen")
+    parser.add_argument("--engine", type=pathlib.Path, default=DEFAULT_ENGINE)
     args = parser.parse_args()
-    if not args.engine.exists():
-        sys.exit(f"{args.engine} not found; build it with: cmake --build build-host --target bikeos_virtual_screen")
-    Handler.engine = Engine(args.engine)
-    Handler.router = Router()
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    print(f"BikeOS screen test bench on http://localhost:{args.port}")
+    try:
+        server = create_server(args.port, args.engine)
+    except FileNotFoundError as error:
+        sys.exit(str(error))
+    print(f"BikeOS screen test bench on http://localhost:{server.server_address[1]}")
     server.serve_forever()
 
 

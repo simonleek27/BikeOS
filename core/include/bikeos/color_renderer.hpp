@@ -64,6 +64,8 @@ public:
     float meters_per_pixel() const { return meters_per_pixel_; }
     // Card and chip rectangles from the last frame, for tests and label layout.
     const Rect& card_rect() const { return card_; }
+    // Leftmost edge and full height of the stacked right-hand chips.
+    const Rect& chip_rect() const { return chip_; }
 
 private:
     struct Bounds {
@@ -95,6 +97,7 @@ private:
     std::uint32_t move_duration_ms_{};
     std::uint64_t last_fix_ms_{};
     Rect card_{};
+    Rect chip_{};
 };
 
 }  // namespace bikeos

@@ -226,8 +226,8 @@ $("calc").onclick = async () => {
 };
 $("send").onclick = async () => {
   try {
-    await post("/api/send", { token: plan.token, with_map: $("with-map").checked });
-    $("conn-foot").textContent = `Sent route ${plan.token}${$("with-map").checked ? " with map" : " (route only)"}`;
+    await post("/api/send", { token: plan.token });
+    $("conn-foot").textContent = `Sent route ${plan.token} (route only; map from the ESP's flash)`;
     plan = null; $("route-summary").hidden = true;
   } catch (error) { showPlanError(error); }
 };

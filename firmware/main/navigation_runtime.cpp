@@ -394,16 +394,11 @@ protocol::ResultCode NavigationRuntime::install_bundle(const std::uint32_t bundl
         return protocol::ResultCode::invalid_bundle;
     }
     if (route_only) {
-        candidate_map.version = 4;
-        candidate_map.origin = candidate_route.points.front();
-        candidate_map.minimum = candidate_route.points.front();
-        candidate_map.maximum = candidate_route.points.front();
-        for (const auto point : candidate_route.points) {
-            candidate_map.minimum.latitude_e7 = std::min(candidate_map.minimum.latitude_e7, point.latitude_e7);
-            candidate_map.minimum.longitude_e7 = std::min(candidate_map.minimum.longitude_e7, point.longitude_e7);
-            candidate_map.maximum.latitude_e7 = std::max(candidate_map.maximum.latitude_e7, point.latitude_e7);
-            candidate_map.maximum.longitude_e7 = std::max(candidate_map.maximum.longitude_e7, point.longitude_e7);
-        }
+        // The phone only sends routes. Road context comes from the map stored
+        // in flash, so a custom route is drawn over the same streets, water and
+        // parks as the demo; outside the stored area the route shows alone.
+        const auto stored = embedded_asset(amsterdam_demo_bmap_start, amsterdam_demo_bmap_end);
+        if (!decode_map(stored, candidate_map)) return protocol::ResultCode::invalid_bundle;
     }
     std::scoped_lock lock(state_->mutex);
     if (!state_->navigation.set_route(candidate_route)) return protocol::ResultCode::invalid_bundle;

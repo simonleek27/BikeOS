@@ -97,23 +97,10 @@ public:
             error = "route file is not a valid BRTE";
             return false;
         }
-        MapDataset map;
-        if (with_map) {
-            map = demo_map_;
-        } else {
-            // Same as NavigationRuntime::install_bundle for a route-only bundle:
-            // a bounding box around the route and no roads or areas.
-            map.version = 4;
-            map.origin = candidate.points.front();
-            map.minimum = candidate.points.front();
-            map.maximum = candidate.points.front();
-            for (const auto point : candidate.points) {
-                map.minimum.latitude_e7 = std::min(map.minimum.latitude_e7, point.latitude_e7);
-                map.minimum.longitude_e7 = std::min(map.minimum.longitude_e7, point.longitude_e7);
-                map.maximum.latitude_e7 = std::max(map.maximum.latitude_e7, point.latitude_e7);
-                map.maximum.longitude_e7 = std::max(map.maximum.longitude_e7, point.longitude_e7);
-            }
-        }
+        // Same as NavigationRuntime::install_bundle: a route-only bundle (what
+        // the app sends) keeps the map stored on the device, and a bundle with
+        // a map would replace it. Both use the bundled demo map here.
+        MapDataset map = demo_map_;
         if (!navigation_.set_route(candidate)) {
             error = "route failed validation";
             return false;
