@@ -149,7 +149,7 @@ def nearest_node(nodes, target):
     return min(nodes, key=lambda node: haversine_m(node, target))
 
 
-def build_route(roads):
+def build_route(roads, start=START, destination_point=DESTINATION):
     graph: dict[tuple[float, float], list[tuple[float, tuple[float, float], str]]] = {}
     for road in roads:
         if road["class"] in (0, 6) or road["highway"] == "steps":
@@ -159,8 +159,8 @@ def build_route(roads):
             graph.setdefault(a, []).append((weight, b, road["name"]))
             if not road["oneway"]:
                 graph.setdefault(b, []).append((weight, a, road["name"]))
-    start = nearest_node(graph, START)
-    destination = nearest_node(graph, DESTINATION)
+    start = nearest_node(graph, start)
+    destination = nearest_node(graph, destination_point)
     queue = [(0.0, start)]
     distance = {start: 0.0}
     previous: dict[tuple[float, float], tuple[tuple[float, float], str]] = {}
@@ -267,7 +267,7 @@ def encode_map(roads):
     return header + payload, len(encoded_roads), point_count
 
 
-def encode_route(points, maneuvers):
+def encode_route(points, maneuvers, route_id=0xA05D0001):
     origin = e7(points[0])
     payload = bytearray()
     for point in points:
@@ -282,7 +282,7 @@ def encode_route(points, maneuvers):
         payload += struct.pack("<HBB", point_index, maneuver_type, len(name)) + name
     header = struct.pack(
         "<4sHHIiiHHII",
-        b"BRTE", 1, 0, 0xA05D0001, origin[0], origin[1], len(points), len(maneuvers),
+        b"BRTE", 1, 0, route_id, origin[0], origin[1], len(points), len(maneuvers),
         len(payload), binascii.crc32(payload) & 0xFFFFFFFF,
     )
     return header + payload

@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BikeOS screen bench</title>
+<link rel="stylesheet" href="bench.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">◉</span> BikeOS screen test bench</div>
+  <div class="sub">Real renderer and navigation engine · 320×240 RGB565 · same frame pacing as the ESP32</div>
+</header>
+
+<main class="layout">
+  <!-- Device -->
+  <section class="device-column">
+    <div class="module" id="module">
+      <div class="pins" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="glass">
+        <canvas id="screen" width="320" height="240" aria-label="Replica of the BikeOS TFT screen"></canvas>
+      </div>
+      <div class="silk">2.8 TFT SPI 240X320 V1.2 · ILI9341</div>
+    </div>
+
+    <div class="readout" id="readout">
+      <span id="r-state">—</span>
+      <span id="r-run">—</span>
+      <span id="r-fps">— fps</span>
+      <span id="r-render">— ms</span>
+      <span id="r-zoom">—</span>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Ride position</h2>
+        <span class="muted" id="progress-text">0 m of 0 m</span>
+      </div>
+      <div class="slider-wrap">
+        <input type="range" id="progress" min="0" max="1000" step="1" value="0" aria-label="Distance along the route">
+        <div class="ticks" id="ticks"></div>
+      </div>
+      <div class="row">
+        <button id="auto" class="primary">▶ Auto-follow route</button>
+        <label class="field">Speed
+          <select id="speed">
+            <option value="1.4">Walking 5 km/h</option>
+            <option value="4.5" selected>Cycling 16 km/h (device demo)</option>
+            <option value="7">Fast 25 km/h</option>
+            <option value="15">Fast-forward 54 km/h</option>
+          </select>
+        </label>
+      </div>
+      <div class="jumps" id="jumps"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Conditions</h2>
+      <div class="toggles">
+        <label class="toggle"><input type="checkbox" id="gps" checked><span>GPS signal</span></label>
+        <label class="toggle"><input type="checkbox" id="phone" checked><span>Phone connected (BT)</span></label>
+        <label class="toggle"><input type="checkbox" id="offroute"><span>Force off route (50 m)</span></label>
+        <label class="toggle"><input type="checkbox" id="noise" checked><span>GPS jitter ±1.5 m</span></label>
+        <label class="toggle"><input type="checkbox" id="smooth" checked><span>Glide between fixes</span></label>
+      </div>
+      <div class="row">
+        <label class="field">Theme
+          <select id="theme"><option value="auto">Auto (sun position)</option><option value="day">Day</option><option value="night">Night</option></select>
+        </label>
+        <label class="field">GPS clock
+          <select id="clock">
+            <option value="live">Now</option>
+            <option value="morning">08:00</option>
+            <option value="noon">13:00</option>
+            <option value="evening">20:00</option>
+            <option value="none">No time from GPS</option>
+          </select>
+        </label>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Display</h2>
+      <div class="row">
+        <label class="field">Frame rate
+          <select id="fps">
+            <option value="7" selected>Device rate (~7 fps)</option>
+            <option value="15">15 fps</option>
+            <option value="30">30 fps</option>
+            <option value="1">1 fps (no glide)</option>
+          </select>
+        </label>
+        <label class="field">Size
+          <select id="scale">
+            <option value="actual">Actual size (2.8″)</option>
+            <option value="1">1× pixels</option>
+            <option value="2" selected>2×</option>
+            <option value="3">3×</option>
+          </select>
+        </label>
+        <button id="shot">Save screenshot</button>
+      </div>
+      <p class="hint">Pixels are the exact RGB565 buffer the TFT driver sends to the panel, expanded to 8 bits per channel.</p>
+    </div>
+  </section>
+
+  <!-- Phone app -->
+  <section class="phone-column">
+    <div class="phone">
+      <div class="statusbar"><span id="phone-time">9:41</span><span class="island"></span><span>▂▄▆ ▭</span></div>
+      <div class="phone-scroll">
+        <div class="nav-title">BikeOS</div>
+
+        <div class="hero">
+          <div class="hero-icon">🚲</div>
+          <div><div class="hero-title">Ride smarter</div><div class="hero-sub">Plan on iPhone · follow on TFT</div></div>
+        </div>
+
+        <div class="card">
+          <div class="conn">
+            <span class="dot" id="conn-dot"></span>
+            <div><div class="conn-name">BikeOS</div><div class="conn-state" id="conn-state">Connected</div></div>
+          </div>
+          <div class="row">
+            <button class="ios-primary" id="connect">Connect</button>
+            <button class="ios-secondary" id="disconnect">Disconnect</button>
+          </div>
+          <div class="conn-foot" id="conn-foot">Demo route on the ESP32</div>
+        </div>
+
+        <div class="card blue">
+          <div class="card-title">🗺 Plan a bicycle route</div>
+          <div class="search">
+            <input id="dest" list="places" placeholder="Search destination" autocomplete="off">
+            <button class="ios-pill" id="dest-search">Search</button>
+          </div>
+          <datalist id="places"></datalist>
+          <div class="segment" role="tablist">
+            <button class="on" id="seg-current">Current location</button>
+            <button id="seg-choose">Choose start</button>
+          </div>
+          <div class="search" id="start-row" hidden>
+            <input id="start" list="places" placeholder="Search starting point" autocomplete="off">
+            <button class="ios-pill" id="start-search">Search</button>
+          </div>
+          <button class="ios-wide" id="calc" disabled>🚲 Calculate bike route</button>
+          <p class="foot">Routes on the OpenStreetMap street graph for the bundled Amsterdam area. Tap the map to drop the destination; with “Choose start”, tap again for the start.</p>
+          <div class="error" id="plan-error" hidden></div>
+        </div>
+
+        <div class="card">
+          <canvas id="minimap" width="640" height="480" aria-label="Route preview map"></canvas>
+          <div class="route-summary" id="route-summary" hidden>
+            <div class="route-name" id="route-name">Route</div>
+            <div class="muted" id="route-meta"></div>
+            <ol class="turns" id="route-turns"></ol>
+            <label class="check"><input type="checkbox" id="with-map"> Send map data too <span class="muted">(the app sends custom routes route-only)</span></label>
+            <button class="ios-primary wide" id="send">⬆ Send to BikeOS</button>
+          </div>
+          <button class="ios-secondary wide" id="demo">▶ Open Amsterdam demo</button>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Ride</div>
+          <div class="app-status" id="app-status">—</div>
+          <div class="ride-grid">
+            <button class="ios-primary" id="cmd-start">▶ Start</button>
+            <button class="ios-secondary" id="cmd-pause">❚❚ Pause</button>
+            <button class="ios-secondary" id="cmd-restart">⏮ Restart from beginning</button>
+            <button class="ios-secondary" id="cmd-offroute">↯ Trigger off-route</button>
+            <button class="ios-danger" id="cmd-stop">■ End ride</button>
+          </div>
+          <div class="error" id="ride-error" hidden></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="bench.js"></script>
+</body>
+</html>

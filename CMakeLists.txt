@@ -41,6 +41,11 @@ target_include_directories(bikeos_color_preview PRIVATE host/simulator)
 target_compile_definitions(bikeos_color_preview PRIVATE BIKEOS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(bikeos_color_preview PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
+add_executable(bikeos_virtual_screen host/virtual_screen/engine.cpp)
+target_link_libraries(bikeos_virtual_screen PRIVATE bikeos_core)
+target_compile_definitions(bikeos_virtual_screen PRIVATE BIKEOS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(bikeos_virtual_screen PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
 # The interactive monochrome simulator needs SDL2; skip it when SDL2 is absent.
 find_package(SDL2 CONFIG QUIET)
 if(SDL2_FOUND)

@@ -19,3 +19,7 @@ firmware/sdkconfig.pre_ble
 .vscode/
 *.swp
 
+
+# Screen test bench caches (OSM street graph, routes built in the bench)
+host/virtual_screen/.cache/
+__pycache__/
