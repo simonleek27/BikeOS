@@ -34,7 +34,7 @@ ls /dev/cu.usbmodem*
 Then flash and monitor, replacing the port if necessary:
 
 ```sh
-idf.py -p /dev/cu.usbmodem1101 flash monitor
+idf.py -p /dev/cu.usbmodem101 flash monitor
 ```
 
 Exit the monitor with `Ctrl-]`.
@@ -46,12 +46,12 @@ Expected output includes BikeOS 0.5.0, ESP32-S3 diagnostics, map/route counts,
 navigation state, progress, cross-track and maneuver distances, framebuffer
 CRCs, reroute requests, and a heartbeat.
 
-## ILI9341 TFT test mode
+## ILI9341 TFT and diagnostic mode
 
-The current local `sdkconfig` selects the 2.8-inch ILI9341 TFT test mode. It
-initializes the panel at 320x240 over SPI and draws six color bars, a border,
-and a center crosshair. This gives us a simple hardware check before sending
-the navigation framebuffer to the display.
+The checked-in `sdkconfig` selects the 2.8-inch ILI9341 navigation display. It
+initializes the panel at 320x240 over SPI and renders the production BikeOS map
+frame. A separate color-bar diagnostic can be enabled temporarily when checking
+power or SPI wiring; it is not the normal navigation image.
 
 The configured signal wiring is:
 
@@ -81,8 +81,9 @@ idf.py build
 idf.py -p /dev/cu.usbmodemXXXX flash monitor
 ```
 
-Once the color pattern is confirmed, turn off `CONFIG_BIKEOS_DISPLAY_TEST_PATTERN`
-in `idf.py menuconfig` to enable the BikeOS framebuffer/map output.
+After a diagnostic check, turn off `CONFIG_BIKEOS_DISPLAY_TEST_PATTERN` in
+`idf.py menuconfig` before testing navigation. The checked-in default already
+has the pattern disabled.
 
 ## Indoor demo mode and navigation controls
 
@@ -117,7 +118,7 @@ deterministic GPS simulator and virtual 128 × 64 framebuffer. Real UART GPS and
 physical ST7565R choices expose their pin settings; unset pins default to `-1`
 and cause startup to fail instead of touching unknown hardware.
 
-The ILI9341 test mode above is enabled for the photo-verified GPIO map. The
-ST7565R option remains available but should stay disabled unless that separate
-display is wired and verified.
+The ILI9341 navigation target is enabled for the photo-verified GPIO map. The
+ST7565R option remains available only as a historical alternate target and
+should stay disabled unless that separate display is wired and verified.
 

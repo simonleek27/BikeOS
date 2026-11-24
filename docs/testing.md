@@ -14,14 +14,15 @@ maneuver distance, persistent off-route detection and reroute throttling,
 framebuffer bounds, rendering, a complete simulated ride, and decoding/rendering
 the checked-in Amsterdam assets.
 
-## Deterministic framebuffer snapshots
+## Deterministic snapshots
 
 ```sh
 ./build-host/bikeos_simulator --export-snapshots build-host/snapshots
 ```
 
-This creates `navigating.png`, `rerouting.png`, `gps-lost.png`, and
-`arrived.png` from the same 1,024 framebuffer bytes used by the firmware.
+This creates deterministic navigation-state PNGs from the legacy monochrome
+simulator. The production physical target is the 320×240 RGB565 color renderer;
+the virtual screen bench below is the authoritative color-TFT preview.
 
 ## Screen test bench
 
@@ -57,8 +58,14 @@ Start, Pause, End ride, Restart and Trigger off-route controls.
 
 ## Physical ESP32 acceptance
 
-The navigation build was flashed to the verified ESP32-S3 on 16 November 2026.
-Serial acceptance included asset decode, per-second fixes and frame CRC changes,
-a 50 m deviation leading to `REROUTING`, a four-update `GPS_LOST` interval,
-recovery, `ARRIVED`, and stable free heap. Physical LCD acceptance remains
-pending its carrier/charge-pump circuit.
+The verified ESP32-S3 was reflashed on 24 November 2026 through
+`/dev/cu.usbmodem101` with ESP-IDF v5.5.6. The serial log confirmed ESP32-S3
+revision 0.2, 16 MB flash, 8 MB PSRAM, deterministic GPS mode, ILI9341
+initialization at 26 MHz, BLE advertising as BikeOS, and stable heartbeats with
+about 8.2 MB free heap. The firmware reported about 4.9 display frames per
+second (render 79 ms, flush 8 ms).
+
+That log proves the driver initialized; it does not prove the TFT was visibly
+readable from the agent's environment. Simon must complete the visual TFT,
+iPhone BLE transfer, disconnect/reconnect, and physical ride checks in
+[`docs/test-plan.md`](test-plan.md).

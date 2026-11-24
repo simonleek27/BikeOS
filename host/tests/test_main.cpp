@@ -407,6 +407,22 @@ void test_ble_fragment_transport()
         CHECK(!bad_order.empty());
         CHECK(reassembler.append(bad_order, final_frame) == BleFragmentResult::invalid);
     }
+
+    const auto first_fragment = encode_ble_fragment(99, static_cast<std::uint16_t>(frame.size()), 0,
+                                                    std::span<const std::uint8_t>(frame).subspan(0, 8));
+    CHECK(!first_fragment.empty());
+    BleFragmentReassembler duplicate_reassembler;
+    std::vector<std::uint8_t> duplicate_output;
+    CHECK(duplicate_reassembler.append(first_fragment, duplicate_output) == BleFragmentResult::incomplete);
+    CHECK(duplicate_reassembler.append(first_fragment, duplicate_output) == BleFragmentResult::invalid);
+    CHECK(duplicate_output.empty());
+
+    const auto oversized = encode_ble_fragment(99, static_cast<std::uint16_t>(frame.size()),
+                                               static_cast<std::uint16_t>(frame.size() - 1),
+                                               std::span<const std::uint8_t>(frame).subspan(0, 2));
+    CHECK(oversized.empty());
+    const std::vector<std::uint8_t> malformed{ble_fragment_magic, ble_fragment_version, 1, 0, 0, 0, 0, 0};
+    CHECK(duplicate_reassembler.append(malformed, duplicate_output) == BleFragmentResult::invalid);
 }
 
 
@@ -560,6 +576,23 @@ void test_color_renderer()
     std::size_t magenta = 0;
     for (const auto pixel : canvas.pixels()) magenta += pixel == bikeos::rgb565(0xD6, 0x00, 0x6F) ? 1U : 0U;
     CHECK(magenta > 200);  // the route ahead
+
+    // Bluetooth must be independently identifiable from GPS. The phone glyph
+    // and BT label occupy the right side of the status chip; connected is green
+    // and disconnected is amber in both day and night palettes.
+    const auto count_status_color = [&](const std::uint16_t color) {
+        std::size_t count = 0;
+        for (int y = 30; y < 54; ++y) {
+            for (int x = 278; x < 316; ++x) count += canvas.pixel(x, y) == color ? 1U : 0U;
+        }
+        return count;
+    };
+    CHECK(count_status_color(bikeos::rgb565(0x16, 0xA3, 0x4A)) > 0);
+    auto disconnected = nav;
+    disconnected.phone_connected = false;
+    renderer.render(canvas, map, route.points, disconnected, {.theme = bikeos::ThemeMode::day});
+    CHECK(count_status_color(bikeos::rgb565(0xF5, 0x9E, 0x0B)) > 0);
+
     // Turn is 80 m ahead: the zoom eases in towards the turn level.
     for (int i = 0; i < 10; ++i) renderer.render(canvas, map, route.points, nav, {});
     CHECK(renderer.meters_per_pixel() < 1.0F);

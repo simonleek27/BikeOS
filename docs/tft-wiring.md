@@ -1,7 +1,7 @@
 # BikeOS 2.8-inch TFT wiring handoff
 
-**Status: J1 reported OPEN; ESP32 `5Vin` output configuration unverified — do
-not connect TFT power yet.**
+**Status: J1 reported OPEN; signal wiring and the ILI9341 driver are verified.
+Confirm the carrier's `IN-OUT` bridge before using `5Vin`.**
 
 This document is hardware documentation only. It does not change firmware,
 GPIO configuration, the navigation engine, the iPhone app, or the BLE protocol.
@@ -19,7 +19,7 @@ The silicon and firmware target are verified:
 | PSRAM | 8 MB octal |
 | USB | Native USB Serial/JTAG |
 | ESP-IDF | 5.5.6 |
-| Current USB port | `/dev/cu.usbmodem1101` (can change) |
+| Last verified USB port | `/dev/cu.usbmodem101` (can change) |
 
 The supplied photo reference shows the **44-pin, dual-USB ESP32-S3-N16R8
 carrier layout**: two USB-C sockets labelled `COM` and `USB`, `RST`/`BOOT`
@@ -112,9 +112,9 @@ group; GPIO4/5 are ordinary exposed GPIOs for display reset and D/C. These are
 | LED | **Do not connect yet** | `3V3` power header after 5Vin check | Female-to-male jumper | Always-on backlight per module manual; do not use a GPIO |
 | SDO(MISO) | Not connected | N/A | None | Safe to omit for write-only color-bar test, per module manual |
 
-The provisional ESP-IDF host for the future driver is **SPI2 / host 1**, because
-that is the host exposed by the existing ST7565 configuration. This is not a
-firmware change or a claim that the driver is ready.
+The production ESP-IDF ILI9341 driver uses **SPI2 / host 1**, with GPIO10/11/12
+for CS/MOSI/SCK and GPIO4/5 for RESET/DC. The same wiring is in
+`firmware/sdkconfig.defaults` and `docs/hardware-setup.md`.
 
 ## 4. Keep these pins disconnected
 
@@ -160,7 +160,7 @@ With **both USB power and any external supply disconnected**:
 7. Check that the candidate ESP 3V3 and GND pins are the pins named by the
    carrier silkscreen, not merely adjacent pins.
 
-## 7. First-power procedure (blocked pending ESP32 5Vin check)
+## 7. First-power procedure (confirm 5Vin before connecting VCC)
 
 1. Disconnect USB from the ESP32.
 2. Leave TFT touch, SD, SDO, VCC, and LED disconnected.
@@ -174,25 +174,19 @@ With **both USB power and any external supply disconnected**:
 8. Apply power through USB only after the checks pass. Do not connect another
    power supply to the ESP32 at the same time.
 9. A lit backlight, white screen, or black screen is **not** proof of SPI
-   communication; the display driver is not installed yet.
+   communication. After power-up, use the serial monitor for the ILI9341 init
+   line and visually confirm the map or color-bar diagnostic on the panel.
 
 ## 8. GPS pins
 
 The NEO-6M GPS uses UART1 on GPIO18 (ESP RX) and GPIO17 (ESP TX), powered
 from `3V3`. See `docs/gps.md`. These do not overlap the TFT pins.
 
-## 9. Firmware handoff for the next milestone
+## 9. Firmware handoff
 
-After Simon confirms the wiring and the first power check:
-
-- add an ILI9341 SPI driver on SPI2/host 1;
-- configure 320×240 landscape and RGB565;
-- use the approved CS/RESET/DC/MOSI/SCK GPIOs;
-- initially leave MISO, touch, and SD unused;
-- drive the backlight only through the verified LED/current path;
-- start with a color-bar test, then text, then the BikeOS map.
-
-No such configuration is enabled by this document.
+The ILI9341 driver, RGB565 map renderer, BLE status chips, and simulator are
+already enabled in the checked-in firmware. Use the color-bar option only as a
+temporary electrical diagnostic, then return to the normal navigation image.
 
 ## Instructions for Simon — Wire These Connections
 

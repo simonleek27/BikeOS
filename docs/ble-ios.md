@@ -27,7 +27,7 @@ for full offline road context.
 
 ## App
 
-Open `ios/BikeOS.xcodeproj`, choose the BikeOS scheme, and run on a real iPhone for CoreBluetooth. The home screen loads and validates `amsterdam_demo.brte`, draws the full route and maneuvers, and shows live ESP32 status. Tap **Connect**, then **Send demo route**. The app transfers the checked-in `amsterdam_demo.bmap` + `amsterdam_demo.brte` assets in 150-byte chunks, pacing each chunk from the ESP32 ACK, and only reports activation after the commit ACK and matching active route ID.
+Open `ios/BikeOS.xcodeproj`, choose the BikeOS scheme, and run on a real iPhone for CoreBluetooth. The home screen loads and validates `amsterdam_demo.brte`, draws the full route and maneuvers, and shows live ESP32 status. Tap **Connect**, then **Send demo route**. The app transfers the checked-in `amsterdam_demo.bmap` + `amsterdam_demo.brte` assets in protocol-sized chunks (up to 476-byte payloads); the BLE write layer fragments each frame to the negotiated ATT limit, paces each chunk from the ESP32 ACK, and only reports activation after the commit ACK and matching active route ID.
 
 After activation, tap **Start**. The deterministic simulator runs indoors at
 4.5 m/s. **Pause**, **Resume**, **Restart**, **Test off-route**, and **End ride**
