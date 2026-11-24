@@ -23,17 +23,17 @@ straight-line route.
 
 ## ESP32 route format
 
-The app encodes the selected geometry and maneuvers as BRTE v1, including the
-route ID and CRC. Coordinates are signed 16-bit offsets in 1e-6-degree units
-from the first point. Routes outside that representable window are rejected
-with a user-facing error rather than being clipped or silently wrapped.
+The app encodes the selected geometry and maneuvers as BRTE. It uses v1 when
+the route fits the original signed-16-bit 1e-6-degree corridor and automatically
+uses v2 when it does not. BRTE v2 stores absolute signed 32-bit E7 coordinates,
+retains the same maneuver records and CRC, and is accepted by both Swift and
+firmware decoders. Encoded routes remain limited to 512 KiB.
 
-The Amsterdam demo sends its checked-in BMAP. A custom route sends a
-route-only bundle (`map_size = 0`); the firmware then keeps the map stored in
-its flash (currently the bundled Amsterdam demo area, about 1 km² around
-Museumplein), so the route is drawn over the same streets, water and parks.
-Outside the stored area the route is drawn on its own. A tiled map of all of
-Amsterdam in a dedicated flash partition is the next map-data milestone.
+The Amsterdam demo can send its checked-in BMAP. A custom route sends a
+route-only bundle (`map_size = 0`); the ESP32 validates it against the offline
+Amsterdam tile pack, draws it over those streets, and refreshes the working
+tiles around the actual GPS position. Roads therefore remain visible after the
+rider leaves the route. Routes outside pack coverage are rejected explicitly.
 
 After the transfer commit is acknowledged, the ESP32 status stream is the
 source of truth for the active route, position, maneuvers, remaining distance,

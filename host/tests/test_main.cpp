@@ -19,6 +19,7 @@
 #include "bikeos/gps.hpp"
 #include "bikeos/gps_simulator.hpp"
 #include "bikeos/map_data.hpp"
+#include "bikeos/map_pack.hpp"
 #include "bikeos/map_renderer.hpp"
 #include "bikeos/navigation.hpp"
 #include "bikeos/nmea.hpp"
@@ -65,6 +66,20 @@ bikeos::Route make_route()
     };
     CHECK(route.prepare_and_validate());
     return route;
+}
+
+bikeos::Route make_long_route()
+{
+    const bikeos::GeoPointE7 origin{.latitude_e7 = 523600000, .longitude_e7 = 48850000};
+    std::vector<bikeos::GeoPointE7> points;
+    for (int index = 0; index <= 24; ++index) points.push_back(offset(origin, index * 4000.0, 0));
+    return bikeos::Route{
+        .route_id = 43,
+        .version = 2,
+        .points = std::move(points),
+        .cumulative_distance_m = {},
+        .maneuvers = {{.point_index = 24, .type = bikeos::ManeuverType::destination, .street_name = "LONG ROUTE"}},
+    };
 }
 
 bikeos::GpsFix fix_at(const bikeos::GeoPointE7 position, const std::uint64_t timestamp, const float accuracy = 3.0F)
@@ -136,6 +151,15 @@ void test_navigation_and_reroute()
     auto corrupt_route = encoded_route;
     corrupt_route.back() ^= 0x40;
     CHECK(!bikeos::decode_route(corrupt_route, decoded_route));
+
+    auto long_route = make_long_route();
+    CHECK(long_route.prepare_and_validate());
+    const auto long_bytes = bikeos::encode_route(long_route);
+    CHECK(long_bytes.size() > 32);
+    CHECK(long_bytes[4] == 2 && long_bytes[5] == 0);
+    CHECK(bikeos::decode_route(long_bytes, decoded_route));
+    CHECK(decoded_route.points.size() == long_route.points.size());
+    CHECK(decoded_route.points.back().longitude_e7 == long_route.points.back().longitude_e7);
 
     const auto start = route.points.front();
     bikeos::NavigationEngine engine;
@@ -230,6 +254,22 @@ void test_map_codec_and_rendering()
     framebuffer.set_pixel(-1, -1);
     framebuffer.set_pixel(128, 64);
     CHECK(framebuffer.bytes().size() == 1024);
+}
+
+void test_map_pack_window()
+{
+    const std::filesystem::path path = std::filesystem::path(BIKEOS_SOURCE_DIR) / "data" / "amsterdam_map.pack";
+    std::ifstream input(path, std::ios::binary);
+    CHECK(input.good());
+    const std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    bikeos::MapTilePack pack;
+    CHECK(pack.open(bytes));
+    CHECK(pack.tile_count() > 1);
+    const bikeos::GeoPointE7 museumplein{523600000, 48850000};
+    CHECK(pack.covers(museumplein));
+    bikeos::MapDataset nearby;
+    CHECK(pack.decode_nearby(museumplein, 900.0F, nearby));
+    CHECK(nearby.roads.size() > 100);
 }
 
 void test_heading_up_rotation()
@@ -632,6 +672,7 @@ int main()
     test_nmea();
     test_navigation_and_reroute();
     test_map_codec_and_rendering();
+    test_map_pack_window();
     test_heading_up_rotation();
     test_simulated_ride();
     test_amsterdam_assets();

@@ -21,6 +21,7 @@
 #include "bikeos/gps.hpp"
 #include "bikeos/gps_simulator.hpp"
 #include "bikeos/map_data.hpp"
+#include "bikeos/map_pack.hpp"
 #include "bikeos/map_renderer.hpp"
 #include "bikeos/navigation.hpp"
 #include "bikeos/protocol.hpp"
@@ -32,6 +33,8 @@ extern const std::uint8_t amsterdam_demo_bmap_start[] asm("_binary_amsterdam_dem
 extern const std::uint8_t amsterdam_demo_bmap_end[] asm("_binary_amsterdam_demo_bmap_end");
 extern const std::uint8_t amsterdam_demo_brte_start[] asm("_binary_amsterdam_demo_brte_start");
 extern const std::uint8_t amsterdam_demo_brte_end[] asm("_binary_amsterdam_demo_brte_end");
+extern const std::uint8_t amsterdam_map_pack_start[] asm("_binary_amsterdam_map_pack_start");
+extern const std::uint8_t amsterdam_map_pack_end[] asm("_binary_amsterdam_map_pack_end");
 
 namespace bikeos {
 namespace {
@@ -66,6 +69,10 @@ std::span<const std::uint8_t> embedded_asset(const std::uint8_t* begin, const st
 struct NavigationRuntime::State {
     mutable std::mutex mutex;
     MapDataset map;
+    MapTilePack map_pack;
+    bool map_pack_ready{};
+    GeoPointE7 last_map_center{};
+    bool have_map_center{};
     Route route;
     GpsSimulator simulator{0xB14E05U};
     GpsFilter filter;
@@ -104,6 +111,8 @@ bool NavigationRuntime::initialize()
     auto state = std::make_unique<State>();
     const auto map_bytes = embedded_asset(amsterdam_demo_bmap_start, amsterdam_demo_bmap_end);
     const auto route_bytes = embedded_asset(amsterdam_demo_brte_start, amsterdam_demo_brte_end);
+    const auto map_pack_bytes = embedded_asset(amsterdam_map_pack_start, amsterdam_map_pack_end);
+    state->map_pack_ready = state->map_pack.open(map_pack_bytes);
     if (!decode_map(map_bytes, state->map)) {
         ESP_LOGE(kTag, "Map validation failed (%u bytes)", static_cast<unsigned>(map_bytes.size()));
         return false;
@@ -115,6 +124,14 @@ bool NavigationRuntime::initialize()
     if (!state->navigation.set_route(state->route)) {
         ESP_LOGE(kTag, "Navigation initialization failed");
         return false;
+    }
+    if (state->map_pack_ready) {
+        MapDataset nearby;
+        if (state->map_pack.decode_nearby(state->route.points.front(), 900.0F, nearby)) {
+            state->map = std::move(nearby);
+            state->last_map_center = state->route.points.front();
+            state->have_map_center = true;
+        }
     }
 #if CONFIG_BIKEOS_GPS_SIM
     if (!state->simulator.set_route(state->route)) return false;
@@ -179,10 +196,12 @@ bool NavigationRuntime::initialize()
     state->canvas = std::make_unique<Canvas565>();
 #endif
     ESP_LOGI(kTag,
-             "OSM map ready: %u roads %u points %u bytes; route=%" PRIu32 " %.0fm %u points",
+             "OSM map ready: %u roads %u points %u bytes; pack=%s (%u tiles); route=%" PRIu32 " %.0fm %u points",
              static_cast<unsigned>(state->map.roads.size()),
              static_cast<unsigned>(state->map.point_count()),
              static_cast<unsigned>(map_bytes.size()),
+             state->map_pack_ready ? "ready" : "fallback",
+             static_cast<unsigned>(state->map_pack.tile_count()),
              state->route.route_id,
              state->route.total_distance_m,
              static_cast<unsigned>(state->route.points.size()));
@@ -225,6 +244,20 @@ void NavigationRuntime::step(const std::uint64_t now_ms)
 #endif
     std::optional<GpsFix> accepted;
     if (candidate) accepted = state_->filter.accept(*candidate);
+    if (accepted && state_->map_pack_ready &&
+        (!state_->have_map_center || distance_m(state_->last_map_center, accepted->position) > 350.0)) {
+        MapDataset nearby;
+        if (state_->map_pack.decode_nearby(accepted->position, 900.0F, nearby)) {
+            state_->map = std::move(nearby);
+            state_->last_map_center = accepted->position;
+            state_->have_map_center = true;
+            ESP_LOGI(kTag, "Loaded nearby map tiles at %" PRId32 ",%" PRId32,
+                     accepted->position.latitude_e7, accepted->position.longitude_e7);
+        } else {
+            ESP_LOGW(kTag, "No offline map tile covers %" PRId32 ",%" PRId32,
+                     accepted->position.latitude_e7, accepted->position.longitude_e7);
+        }
+    }
     const auto navigation = state_->navigation.update(accepted, state_->phone_connected, now_ms);
     if (navigation.run_state == NavigationRunState::arrived) state_->simulation_paused = true;
     if (accepted && accepted->utc_epoch_ms != 0) {
@@ -394,16 +427,22 @@ protocol::ResultCode NavigationRuntime::install_bundle(const std::uint32_t bundl
         return protocol::ResultCode::invalid_bundle;
     }
     if (route_only) {
-        // The phone only sends routes. Road context comes from the map stored
-        // in flash, so a custom route is drawn over the same streets, water and
-        // parks as the demo; outside the stored area the route shows alone.
-        const auto stored = embedded_asset(amsterdam_demo_bmap_start, amsterdam_demo_bmap_end);
-        if (!decode_map(stored, candidate_map)) return protocol::ResultCode::invalid_bundle;
+        // Custom routes use the local tiled map pack. Do not silently fall
+        // back to the small demo rectangle for an unrelated route.
+        if (!state_->map_pack_ready ||
+            !std::all_of(candidate_route.points.begin(), candidate_route.points.end(),
+                         [&](const GeoPointE7 point) { return state_->map_pack.covers(point); }) ||
+            !state_->map_pack.decode_nearby(candidate_route.points.front(), 900.0F, candidate_map)) {
+            ESP_LOGW(kTag, "Route %" PRIu32 " is outside offline map coverage", candidate_route.route_id);
+            return protocol::ResultCode::invalid_bundle;
+        }
     }
     std::scoped_lock lock(state_->mutex);
     if (!state_->navigation.set_route(candidate_route)) return protocol::ResultCode::invalid_bundle;
     state_->map = std::move(candidate_map);
     state_->route = std::move(candidate_route);
+    state_->last_map_center = state_->route.points.front();
+    state_->have_map_center = true;
 #if CONFIG_BIKEOS_GPS_SIM
     if (!state_->simulator.set_route(state_->route)) return protocol::ResultCode::invalid_bundle;
     state_->simulator.set_speed_mps(kDemoSpeedMps);

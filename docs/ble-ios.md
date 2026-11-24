@@ -19,11 +19,17 @@ Play/Pause/Resume/Restart button only after the ESP32 acknowledgement and status
 confirmation. While paused, the simulator stops advancing, reports speed 0, and
 continues sending status notifications.
 
-Custom routes are sent as route-only bundles (`map_size = 0`) with a synthesized
-route bounding box. The route line and rider remain valid outside the bundled
-Amsterdam BMAP area; surrounding offline roads are intentionally omitted rather
-than shown incorrectly. The checked-in Amsterdam demo continues to send its BMAP
-for full offline road context.
+Custom routes are sent as route-only bundles (`map_size = 0`). The firmware
+checks them against the offline Amsterdam tile pack, then loads a nearby working
+window from flash. That window follows the actual ESP32 GPS position, not just
+the planned route, so nearby streets continue to render when the rider goes
+off-route. Routes outside pack coverage are rejected clearly. BRTE v2 is chosen
+automatically for long routes.
+
+The iPhone remembers the last peripheral and automatically retries after a
+disconnect or Bluetooth power cycle. It re-discovers characteristics and waits
+for notifications before reporting `Ready`; interrupted transfers are failed
+and restarted from byte zero rather than resumed blindly.
 
 ## App
 

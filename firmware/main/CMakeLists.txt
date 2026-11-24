@@ -18,6 +18,7 @@ idf_component_register(
         "../../core/src/gps.cpp"
         "../../core/src/gps_simulator.cpp"
         "../../core/src/map_data.cpp"
+        "../../core/src/map_pack.cpp"
         "../../core/src/map_renderer.cpp"
         "../../core/src/navigation.cpp"
         "../../core/src/nmea.cpp"
@@ -33,4 +34,7 @@ target_add_binary_data(${COMPONENT_LIB}
 target_add_binary_data(${COMPONENT_LIB}
     "${CMAKE_CURRENT_LIST_DIR}/../../data/amsterdam_demo.brte"
     BINARY RENAME_TO "amsterdam_demo_brte")
+target_add_binary_data(${COMPONENT_LIB}
+    "${CMAKE_CURRENT_LIST_DIR}/../../data/amsterdam_map.pack"
+    BINARY RENAME_TO "amsterdam_map_pack")
 

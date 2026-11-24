@@ -15,6 +15,7 @@ add_library(bikeos_core STATIC
     core/src/gps.cpp
     core/src/gps_simulator.cpp
     core/src/map_data.cpp
+    core/src/map_pack.cpp
     core/src/map_renderer.cpp
     core/src/navigation.cpp
     core/src/nmea.cpp

@@ -292,7 +292,7 @@ private struct ConnectionStatusView: View {
     let deviceName: String
     let firmwareInfo: String
     private var color: Color {
-        switch state { case .connected, .readyForTransfer: .green; case .scanning, .connecting, .readyToScan: .orange; case .failed: .red; case .bluetoothOff, .disconnected: .gray }
+        switch state { case .connected, .readyForTransfer: .green; case .scanning, .connecting, .reconnecting, .readyToScan: .orange; case .failed: .red; case .bluetoothOff, .disconnected: .gray }
     }
     var body: some View {
         HStack(spacing: 9) {

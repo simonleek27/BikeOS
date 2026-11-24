@@ -10,8 +10,10 @@ namespace bikeos {
 namespace {
 
 constexpr std::array<std::uint8_t, 4> kMagic{'B', 'R', 'T', 'E'};
-constexpr std::uint16_t kVersion = 1;
+constexpr std::uint16_t kVersionV1 = 1;
+constexpr std::uint16_t kVersionV2 = 2;
 constexpr std::int32_t kQuantizationE7 = 10;
+constexpr std::size_t kMaxEncodedRouteSize = 512U * 1024U;
 
 template <typename T>
 void append_le(std::vector<std::uint8_t>& output, T value)
@@ -43,15 +45,28 @@ std::vector<std::uint8_t> encode_route(const Route& input)
     if (!route.prepare_and_validate() || route.points.size() > 65535 || route.maneuvers.size() > 65535) return {};
     const GeoPointE7 origin = route.points.front();
     std::vector<std::uint8_t> payload;
+    bool fits_v1 = true;
     for (const auto point : route.points) {
         const auto lat = (point.latitude_e7 - origin.latitude_e7) / kQuantizationE7;
         const auto lon = (point.longitude_e7 - origin.longitude_e7) / kQuantizationE7;
         if (lat < std::numeric_limits<std::int16_t>::min() || lat > std::numeric_limits<std::int16_t>::max() ||
             lon < std::numeric_limits<std::int16_t>::min() || lon > std::numeric_limits<std::int16_t>::max()) {
-            return {};
+            fits_v1 = false;
+            break;
         }
-        append_le(payload, static_cast<std::int16_t>(lat));
-        append_le(payload, static_cast<std::int16_t>(lon));
+    }
+    if (fits_v1) {
+        for (const auto point : route.points) {
+            append_le(payload, static_cast<std::int16_t>((point.latitude_e7 - origin.latitude_e7) / kQuantizationE7));
+            append_le(payload, static_cast<std::int16_t>((point.longitude_e7 - origin.longitude_e7) / kQuantizationE7));
+        }
+    } else {
+        // v2 uses absolute E7 coordinates. This removes the approximately
+        // 65 km corridor limit of v1 without changing maneuver semantics.
+        for (const auto point : route.points) {
+            append_le(payload, point.latitude_e7);
+            append_le(payload, point.longitude_e7);
+        }
     }
     for (const auto& maneuver : route.maneuvers) {
         if (maneuver.point_index > 65535 || maneuver.street_name.size() > 96) return {};
@@ -60,10 +75,11 @@ std::vector<std::uint8_t> encode_route(const Route& input)
         append_le(payload, static_cast<std::uint8_t>(maneuver.street_name.size()));
         payload.insert(payload.end(), maneuver.street_name.begin(), maneuver.street_name.end());
     }
+    if (payload.size() + 32U > kMaxEncodedRouteSize) return {};
 
     std::vector<std::uint8_t> encoded;
     encoded.insert(encoded.end(), kMagic.begin(), kMagic.end());
-    append_le(encoded, kVersion);
+    append_le(encoded, fits_v1 ? kVersionV1 : kVersionV2);
     append_le(encoded, static_cast<std::uint16_t>(0));
     append_le(encoded, route.route_id);
     append_le(encoded, origin.latitude_e7);
@@ -96,18 +112,26 @@ bool decode_route(const std::span<const std::uint8_t> encoded, Route& output)
         !read_le(encoded, offset, expected_crc)) {
         return false;
     }
-    if (version != kVersion || flags != 0 || point_count < 2 || payload_size != encoded.size() - offset ||
+    if ((version != kVersionV1 && version != kVersionV2) || flags != 0 || point_count < 2 ||
+        payload_size != encoded.size() - offset || encoded.size() > kMaxEncodedRouteSize ||
         crc32(encoded.subspan(offset)) != expected_crc) {
         return false;
     }
     route.version = version;
     route.points.reserve(point_count);
     for (std::uint16_t i = 0; i < point_count; ++i) {
-        std::int16_t lat = 0;
-        std::int16_t lon = 0;
-        if (!read_le(encoded, offset, lat) || !read_le(encoded, offset, lon)) return false;
-        route.points.push_back({origin.latitude_e7 + lat * kQuantizationE7,
-                                origin.longitude_e7 + lon * kQuantizationE7});
+        if (version == kVersionV1) {
+            std::int16_t lat = 0;
+            std::int16_t lon = 0;
+            if (!read_le(encoded, offset, lat) || !read_le(encoded, offset, lon)) return false;
+            route.points.push_back({origin.latitude_e7 + lat * kQuantizationE7,
+                                    origin.longitude_e7 + lon * kQuantizationE7});
+        } else {
+            GeoPointE7 point{};
+            if (!read_le(encoded, offset, point.latitude_e7) || !read_le(encoded, offset, point.longitude_e7) ||
+                !valid_coordinate(point)) return false;
+            route.points.push_back(point);
+        }
     }
     route.maneuvers.reserve(maneuver_count);
     for (std::uint16_t i = 0; i < maneuver_count; ++i) {

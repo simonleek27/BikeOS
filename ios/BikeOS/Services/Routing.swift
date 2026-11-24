@@ -50,12 +50,27 @@ enum BikeOSRouteDecodeError: LocalizedError {
 enum BikeOSRouteDecoder {
     static func decode(_ data: Data, name: String = "BRTE route", source: String = "BRTE") throws -> BikeOSRoutePlan {
         guard data.count >= 32, data.prefix(4) == Data([0x42, 0x52, 0x54, 0x45]) else { throw BikeOSRouteDecodeError.invalidHeader }
-        guard data.leUInt16(at: 4) == 1, data.leUInt16(at: 6) == 0 else { throw BikeOSRouteDecodeError.unsupportedVersion }
+        let version = data.leUInt16(at: 4)
+        guard version == 1 || version == 2, data.leUInt16(at: 6) == 0 else { throw BikeOSRouteDecodeError.unsupportedVersion }
         let routeID = data.leUInt32(at: 8); let originLat = Int32(bitPattern: data.leUInt32(at: 12)); let originLon = Int32(bitPattern: data.leUInt32(at: 16)); let pointCount = Int(data.leUInt16(at: 20)); let maneuverCount = Int(data.leUInt16(at: 22)); let payloadSize = Int(data.leUInt32(at: 24)); let expectedCRC = data.leUInt32(at: 28)
-        guard pointCount >= 2, payloadSize == data.count - 32 else { throw BikeOSRouteDecodeError.invalidPayload }
+        guard pointCount >= 2, payloadSize == data.count - 32, data.count <= 512 * 1024 else { throw BikeOSRouteDecodeError.invalidPayload }
         let payload = data.subdata(in: 32..<data.count); guard BikeOSFrame.crc32(payload) == expectedCRC else { throw BikeOSRouteDecodeError.checksumMismatch }
         var offset = 0; var points = [CLLocationCoordinate2D](); points.reserveCapacity(pointCount)
-        for _ in 0..<pointCount { guard offset + 4 <= payload.count else { throw BikeOSRouteDecodeError.invalidPayload }; let latOffset = Int16(bitPattern: payload.leUInt16(at: offset)); offset += 2; let lonOffset = Int16(bitPattern: payload.leUInt16(at: offset)); offset += 2; points.append(CLLocationCoordinate2D(latitude: Double(originLat + Int32(latOffset) * 10) * 1e-7, longitude: Double(originLon + Int32(lonOffset) * 10) * 1e-7)) }
+        for _ in 0..<pointCount {
+            if version == 1 {
+                guard offset + 4 <= payload.count else { throw BikeOSRouteDecodeError.invalidPayload }
+                let latOffset = Int16(bitPattern: payload.leUInt16(at: offset)); offset += 2
+                let lonOffset = Int16(bitPattern: payload.leUInt16(at: offset)); offset += 2
+                points.append(CLLocationCoordinate2D(latitude: Double(originLat + Int32(latOffset) * 10) * 1e-7, longitude: Double(originLon + Int32(lonOffset) * 10) * 1e-7))
+            } else {
+                guard offset + 8 <= payload.count else { throw BikeOSRouteDecodeError.invalidPayload }
+                let lat = Int32(bitPattern: payload.leUInt32(at: offset)); offset += 4
+                let lon = Int32(bitPattern: payload.leUInt32(at: offset)); offset += 4
+                let coordinate = CLLocationCoordinate2D(latitude: Double(lat) * 1e-7, longitude: Double(lon) * 1e-7)
+                guard (-90...90).contains(coordinate.latitude), (-180...180).contains(coordinate.longitude) else { throw BikeOSRouteDecodeError.invalidPayload }
+                points.append(coordinate)
+            }
+        }
         var maneuvers = [BikeOSManeuver](); maneuvers.reserveCapacity(maneuverCount)
         for index in 0..<maneuverCount { guard offset + 4 <= payload.count else { throw BikeOSRouteDecodeError.invalidManeuver }; let pointIndex = Int(payload.leUInt16(at: offset)); offset += 2; guard pointIndex < points.count, let type = BikeOSManeuverType(rawValue: payload[offset]) else { throw BikeOSRouteDecodeError.invalidManeuver }; offset += 1; let nameLength = Int(payload[offset]); offset += 1; guard nameLength <= 96, offset + nameLength <= payload.count else { throw BikeOSRouteDecodeError.invalidManeuver }; let street = String(data: payload.subdata(in: offset..<(offset + nameLength)), encoding: .utf8) ?? ""; offset += nameLength; maneuvers.append(BikeOSManeuver(id: index, pointIndex: pointIndex, type: type, streetName: street, distanceM: 0)) }
         guard offset == payload.count else { throw BikeOSRouteDecodeError.invalidPayload }
@@ -77,27 +92,40 @@ enum BikeOSRouteEncoder {
         }
         let originLat = Int64((route.points[0].latitude * 10_000_000).rounded())
         let originLon = Int64((route.points[0].longitude * 10_000_000).rounded())
-        var payload = Data()
-        for point in route.points {
+        let fitsV1 = route.points.allSatisfy { point in
             let lat = Int64((point.latitude * 10_000_000).rounded()) - originLat
             let lon = Int64((point.longitude * 10_000_000).rounded()) - originLon
-            guard abs(lat) <= Int64(Int16.max) * 10, abs(lon) <= Int64(Int16.max) * 10 else {
-                throw BikeOSRouteDecodeError.unsupportedGeometry
+            return abs(lat) <= Int64(Int16.max) * 10 && abs(lon) <= Int64(Int16.max) * 10
+        }
+        var payload = Data()
+        if fitsV1 {
+            for point in route.points {
+                let lat = Int64((point.latitude * 10_000_000).rounded()) - originLat
+                let lon = Int64((point.longitude * 10_000_000).rounded()) - originLon
+                payload.appendLE(Int16(max(Int64(Int16.min), min(Int64(Int16.max), lat / 10))))
+                payload.appendLE(Int16(max(Int64(Int16.min), min(Int64(Int16.max), lon / 10))))
             }
-            payload.appendLE(Int16(max(Int64(Int16.min), min(Int64(Int16.max), lat / 10))))
-            payload.appendLE(Int16(max(Int64(Int16.min), min(Int64(Int16.max), lon / 10))))
         }
-        for maneuver in route.maneuvers {
-            guard maneuver.pointIndex >= 0, maneuver.pointIndex < route.points.count else { throw BikeOSRouteDecodeError.invalidManeuver }
-            let name = Data(maneuver.streetName.utf8)
-            guard name.count <= 96 else { throw BikeOSRouteDecodeError.invalidManeuver }
-            payload.appendLE(UInt16(maneuver.pointIndex))
-            payload.append(maneuver.type.rawValue)
-            payload.append(UInt8(name.count))
-            payload.append(name)
+        func appendManeuvers() throws {
+            for maneuver in route.maneuvers {
+                guard maneuver.pointIndex >= 0, maneuver.pointIndex < route.points.count else { throw BikeOSRouteDecodeError.invalidManeuver }
+                let name = Data(maneuver.streetName.utf8)
+                guard name.count <= 96 else { throw BikeOSRouteDecodeError.invalidManeuver }
+                payload.appendLE(UInt16(maneuver.pointIndex)); payload.append(maneuver.type.rawValue); payload.append(UInt8(name.count)); payload.append(name)
+            }
         }
+        try appendManeuvers()
+        if !fitsV1 {
+            payload = Data()
+            for point in route.points {
+                payload.appendLE(Int32((point.latitude * 10_000_000).rounded()))
+                payload.appendLE(Int32((point.longitude * 10_000_000).rounded()))
+            }
+            try appendManeuvers()
+        }
+        guard payload.count + 32 <= 512 * 1024 else { throw BikeOSRouteDecodeError.unsupportedGeometry }
         var output = Data([0x42, 0x52, 0x54, 0x45])
-        output.appendLE(UInt16(1)); output.appendLE(UInt16(0)); output.appendLE(route.routeID)
+        output.appendLE(UInt16(fitsV1 ? 1 : 2)); output.appendLE(UInt16(0)); output.appendLE(route.routeID)
         output.appendLE(Int32(originLat)); output.appendLE(Int32(originLon))
         output.appendLE(UInt16(route.points.count)); output.appendLE(UInt16(route.maneuvers.count))
         output.appendLE(UInt32(payload.count)); output.appendLE(BikeOSFrame.crc32(payload)); output.append(payload)

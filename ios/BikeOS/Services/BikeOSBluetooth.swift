@@ -10,6 +10,7 @@ enum BikeOSConnectionState: Equatable {
     case connecting
     case connected
     case readyForTransfer
+    case reconnecting
     case disconnected
     case failed
 
@@ -21,6 +22,7 @@ enum BikeOSConnectionState: Equatable {
         case .connecting: "Connecting…"
         case .connected: "Connected"
         case .readyForTransfer: "Ready"
+        case .reconnecting: "Reconnecting…"
         case .disconnected: "Disconnected"
         case .failed: "Connection failed"
         }
@@ -77,6 +79,11 @@ enum BikeOSBLEFragment {
     private var phase: TransferPhase = .idle
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
+    private var preferredPeripheralID: UUID?
+    private var connectionRequested = false
+    private var reconnectAttempt = 0
+    private var reconnectTask: Task<Void, Never>?
+    private var scanTimeoutTask: Task<Void, Never>?
     private var control: CBCharacteristic?
     private var data: CBCharacteristic?
     private var sequence: UInt32 = 1
@@ -104,7 +111,8 @@ enum BikeOSBLEFragment {
 
     override init() {
         super.init()
-        central = CBCentralManager(delegate: self, queue: nil)
+        central = CBCentralManager(delegate: self, queue: nil,
+                                   options: [CBCentralManagerOptionRestoreIdentifierKey: "BikeOS.Bluetooth"])
     }
 
     var connection: String { connectionState.label }
@@ -118,17 +126,59 @@ enum BikeOSBLEFragment {
     }
 
     func connect() {
+        connectionRequested = true
+        reconnectAttempt = 0
+        reconnectTask?.cancel()
         guard central.state == .poweredOn else {
             connectionState = .bluetoothOff
             return
         }
-        connectionState = .scanning
-        central.scanForPeripherals(withServices: [CBUUID(string: BikeOSUUID.service)],
-                                   options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
+        beginScanOrRetrieve()
     }
 
     func disconnect() {
+        connectionRequested = false
+        reconnectTask?.cancel()
+        scanTimeoutTask?.cancel()
+        central.stopScan()
         if let peripheral { central.cancelPeripheralConnection(peripheral) }
+        connectionState = .disconnected
+    }
+
+    private func beginScanOrRetrieve() {
+        guard connectionRequested, central.state == .poweredOn else { return }
+        if let id = preferredPeripheralID,
+           let known = central.retrievePeripherals(withIdentifiers: [id]).first {
+            peripheral = known
+            known.delegate = self
+            connectionState = .connecting
+            central.connect(known)
+            return
+        }
+        connectionState = reconnectAttempt == 0 ? .scanning : .reconnecting
+        central.scanForPeripherals(withServices: [CBUUID(string: BikeOSUUID.service)],
+                                   options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
+        scanTimeoutTask?.cancel()
+        scanTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            guard !Task.isCancelled, let self, self.connectionRequested else { return }
+            self.central.stopScan()
+            self.scheduleReconnect(reason: "ESP32 was not found")
+        }
+    }
+
+    private func scheduleReconnect(reason: String) {
+        guard connectionRequested, central.state == .poweredOn else { return }
+        reconnectAttempt += 1
+        let delay = min(30, 1 << min(reconnectAttempt - 1, 5))
+        connectionState = .reconnecting
+        lastAck = "(reason). Reconnecting in (delay)s…"
+        reconnectTask?.cancel()
+        reconnectTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000_000)
+            guard !Task.isCancelled, let self, self.connectionRequested else { return }
+            self.beginScanOrRetrieve()
+        }
     }
 
     func requestStatus() {
@@ -288,8 +338,11 @@ enum BikeOSBLEFragment {
             lastAck = "Could not encode command"
             return 0
         }
-        guard write(frame, to: control, on: peripheral) else { return 0 }
         if trackAck, let label { pendingCommands[frameSequence] = (label: label, type: type) }
+        guard write(frame, to: control, on: peripheral) else {
+            pendingCommands.removeValue(forKey: frameSequence)
+            return 0
+        }
         return frameSequence
     }
 
@@ -494,7 +547,27 @@ enum BikeOSBLEFragment {
 extension BikeOSBluetooth: CBCentralManagerDelegate {
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
         Task { @MainActor in
-            self.connectionState = central.state == .poweredOn ? .readyToScan : .bluetoothOff
+            if central.state != .poweredOn {
+                self.connectionState = .bluetoothOff
+                self.reconnectTask?.cancel()
+                self.scanTimeoutTask?.cancel()
+                self.central.stopScan()
+            } else if self.connectionRequested {
+                self.beginScanOrRetrieve()
+            } else {
+                self.connectionState = .readyToScan
+            }
+        }
+    }
+
+    nonisolated func centralManager(_ central: CBCentralManager, willRestoreState dictionary: [String : Any]) {
+        Task { @MainActor in
+            if let restored = dictionary[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral],
+               let restoredPeripheral = restored.first {
+                self.peripheral = restoredPeripheral
+                self.preferredPeripheralID = restoredPeripheral.identifier
+                self.connectionRequested = true
+            }
         }
     }
 
@@ -504,6 +577,10 @@ extension BikeOSBluetooth: CBCentralManagerDelegate {
                                    rssi RSSI: NSNumber) {
         Task { @MainActor in
             self.peripheral = peripheral
+            self.preferredPeripheralID = peripheral.identifier
+            self.connectionRequested = true
+            self.reconnectAttempt = 0
+            self.scanTimeoutTask?.cancel()
             self.deviceName = peripheral.name ?? "BikeOS"
             self.connectionState = .connecting
             central.stopScan()
@@ -518,8 +595,19 @@ extension BikeOSBluetooth: CBCentralManagerDelegate {
             self.data = nil
             self.ackNotifyReady = false
             self.statusNotifyReady = false
+            self.reconnectAttempt = 0
+            self.reconnectTask?.cancel()
             self.connectionState = .connected
             peripheral.discoverServices([CBUUID(string: BikeOSUUID.service)])
+        }
+    }
+
+    nonisolated func centralManager(_ central: CBCentralManager,
+                                   didFailToConnect peripheral: CBPeripheral,
+                                   error: Error?) {
+        Task { @MainActor in
+            self.connectionState = .failed
+            self.scheduleReconnect(reason: error?.localizedDescription ?? "Connection failed")
         }
     }
 
@@ -527,11 +615,8 @@ extension BikeOSBluetooth: CBCentralManagerDelegate {
                                    didDisconnectPeripheral peripheral: CBPeripheral,
                                    error: Error?) {
         Task { @MainActor in
-            self.connectionState = .disconnected
-            self.status = nil
-            self.liveCoordinate = nil
-            self.liveHeading = nil
-            self.activeRouteID = nil
+            let shouldReconnect = self.connectionRequested
+            self.connectionState = shouldReconnect ? .reconnecting : .disconnected
             self.transferringRouteID = nil
             self.control = nil
             self.data = nil
@@ -545,6 +630,8 @@ extension BikeOSBluetooth: CBCentralManagerDelegate {
             self.responseWriteInFlight = false
             self.phase = .idle
             self.clearTransferTimeout()
+            self.interpolationTask?.cancel()
+            if shouldReconnect { self.scheduleReconnect(reason: "ESP32 disconnected") }
         }
     }
 }

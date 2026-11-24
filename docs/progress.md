@@ -7,7 +7,7 @@ Updated: 24 November 2026
 | ESP32 identification | Complete | ESP32-S3 rev 0.2, 16 MB flash, 8 MB PSRAM, native USB verified |
 | ESP-IDF bring-up | Complete | ESP-IDF v5.5.6 firmware built and flashed to the verified ESP32-S3; boot log captured |
 | Shared C++ core | Complete for current demo | Strict host build and test suite pass |
-| Real OSM map pipeline | Complete for bounded demo | BMAP v3 with deduplicated street-name table; 1,017 roads / 2,936 points, reproducible binary assets |
+| Real OSM map pipeline | Offline Amsterdam pack implemented | 136 CRC-checked BMAP tiles (~2 MB); ESP32 loads a rider-centered working window from flash and refreshes it as GPS moves |
 | Navigation engine | Complete for demo | Matching, maneuvers, off-route, reroute throttle, GPS loss, arrival |
 | Virtual color screen bench | Ready | Standalone macOS/browser bench uses the production ColorMapRenderer, supports route planning, fault toggles, ride controls, and RGB565 screenshots |
 | ESP navigation runtime | Complete for simulated source | Physical board completed 1.41 km scripted ride over serial |
@@ -15,7 +15,7 @@ Updated: 24 November 2026
 | ILI9341 TFT identification | Complete | 2.8-inch 240×320 SPI color module; color-bar test previously verified |
 | ILI9341 SPI driver | Complete | 320×240 landscape RGB565 driver initialized at 26 MHz on the physical board |
 | TFT wiring | Verified for current module | CS 10, RESET 4, DC 5, MOSI 11, SCK 12; power safety remains documented |
-| BLE route transfer | Implemented and tested | ACK-paced transfer, 20/23/244/247-byte ATT fragmentation, strict reassembly, route-only bundles, transfer diagnostics, and activated-route verification |
+| BLE route transfer | Implemented and tested | ACK-paced transfer, 20/23/244/247-byte ATT fragmentation, strict reassembly, BRTE v1/v2 route-only bundles, transfer diagnostics, and activated-route verification |
 | iPhone app | Navigation/planner redesign implemented | Compact map-first navigation layout, authoritative run-state controls, robust hit targets, real destination search, GraphHopper bicycle routing, route preview, custom BRTE upload, and active-route gating |
 | Indoor simulator controls | Complete | Deterministic 4.5 m/s simulator starts only after Start, pauses at the exact position with speed 0, resumes, restarts, stops, and reports run state over BLE |
 
@@ -34,9 +34,12 @@ The data pipeline, navigation behavior, shared RGB565 renderer, virtual bench,
 physical ESP execution, ILI9341 driver, and first real iPhone↔ESP32 BLE
 connection are working. Transfer progress is driven by acknowledgements rather
 than a blind write burst. GPS is currently the deterministic scripted source;
-no physical GPS module is connected. Custom routes are encoded into BRTE v1 and
-sent as route-only bundles, preserving the stored map without showing unrelated
-roads outside its coverage.
+no physical GPS module is connected. Custom routes are encoded into BRTE v1 or
+v2 and sent as route-only bundles, preserving the stored map without showing
+unrelated roads outside its coverage. BRTE v2 now supports longer routes, and the ESP32
+reloads map tiles around the actual rider position, including while off-route.
+The iPhone also has automatic reconnect and CoreBluetooth state restoration;
+physical cycling reliability still needs to be exercised.
 
 Firmware 0.5.0 was rebuilt and successfully flashed to `/dev/cu.usbmodem101` on
 24 November 2026. The serial log confirmed ESP32-S3 identity, ILI9341 init,

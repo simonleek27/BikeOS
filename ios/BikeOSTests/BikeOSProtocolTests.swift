@@ -70,18 +70,22 @@ final class BikeOSProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.maneuvers.first?.streetName, "Damrak")
     }
 
-    func testRouteEncoderRejectsInvalidOrTooWideGeometry() {
+    func testRouteEncoderRejectsInvalidGeometryAndUsesV2ForLongGeometry() throws {
         let invalid = BikeOSRoutePlan(id: 3, name: "Invalid", points: [
             CLLocationCoordinate2D(latitude: 100.0, longitude: 4.0),
             CLLocationCoordinate2D(latitude: 52.0, longitude: 4.1)
         ])
         XCTAssertThrowsError(try BikeOSRouteEncoder.encode(invalid))
 
-        let tooWide = BikeOSRoutePlan(id: 4, name: "Too wide", points: [
+        let tooWide = BikeOSRoutePlan(id: 4, name: "Long route", points: [
             CLLocationCoordinate2D(latitude: 52.0, longitude: 4.0),
             CLLocationCoordinate2D(latitude: 52.0, longitude: 4.05)
         ])
-        XCTAssertThrowsError(try BikeOSRouteEncoder.encode(tooWide))
+        let encoded = try BikeOSRouteEncoder.encode(tooWide)
+        XCTAssertEqual(encoded.leUInt16(at: 4), 2)
+        let decoded = try BikeOSRouteDecoder.decode(encoded)
+        XCTAssertEqual(decoded.points.count, 2)
+        XCTAssertEqual(decoded.points[1].longitude, 4.05, accuracy: 0.0000001)
     }
 
     func testBLEFragmentEnvelopeAtLowAndHighATTLimits() {
