@@ -15,6 +15,13 @@ cp ios/GraphHopper.example.xcconfig ios/GraphHopper.xcconfig
 # edit the copied file, then use it as the Xcode scheme configuration
 ```
 
+The endpoint line must remain in the provided escaped form (`https:/$()/...`);
+Xcode's `.xcconfig` parser treats a literal `//` as a comment and would otherwise
+truncate the URL to `https:`. The app now reports missing keys, invalid endpoints,
+HTTP errors, and no-route responses directly in the planner. If **Current
+location** has not produced a fix yet, choose **Choose start** and search for an
+Amsterdam starting point instead.
+
 Alternatively set `GRAPHHOPPER_API_KEY` as a scheme environment variable. If no
 key is available, the Amsterdam demo remains usable. Routing failures are shown
 in the app; it never substitutes a straight-line or fictional route.

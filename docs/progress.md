@@ -21,6 +21,12 @@ Updated: 24 November 2026
 
 ## Current assessment
 
+The custom-route planner now loads the GraphHopper endpoint correctly from the
+local Xcode configuration. A literal `https://` in an `.xcconfig` was previously
+parsed as a comment and became `https:`, which made MapKit search work while
+route calculation failed. The planner also no longer hides routing errors behind
+the bundled demo route and starts iPhone location updates when Home appears.
+
 The data pipeline, navigation behavior, shared RGB565 renderer, virtual bench,
 physical ESP execution, ILI9341 driver, and first real iPhone↔ESP32 BLE
 connection are working. Transfer progress is driven by acknowledgements rather

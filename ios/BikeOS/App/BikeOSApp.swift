@@ -50,8 +50,8 @@ struct BikeOSHomeView: View {
                     header
                     deviceCard
                     plannerCard
+                    if let routeError { errorCard(routeError) }
                     if let route { routeCard(route) }
-                    else if let routeError { errorCard(routeError) }
                     demoCard
                 }
                 .padding(.horizontal, 16)
@@ -62,7 +62,7 @@ struct BikeOSHomeView: View {
             .navigationDestination(isPresented: $showingNavigation) {
                 if let route { ActiveNavigationView(route: route, bluetooth: bluetooth) }
             }
-            .task { loadDemoRoute() }
+            .task { location.start() }
         }
     }
 
@@ -125,6 +125,10 @@ struct BikeOSHomeView: View {
                 Text("Choose start").tag(false)
             }
             .pickerStyle(.segmented)
+            if useCurrentLocation && location.location == nil {
+                Label("Waiting for the iPhone location…", systemImage: "location.slash")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if !useCurrentLocation {
                 HStack(spacing: 8) {
                     Image(systemName: "flag").foregroundStyle(.secondary)
@@ -241,12 +245,14 @@ struct BikeOSHomeView: View {
         if useCurrentLocation, let current = location.location?.coordinate { start = current }
         else if useCurrentLocation {
             location.start()
-            routeError = "Allow location access, then tap Calculate bike route again."
+            routeError = "The iPhone has not provided a location yet. Allow Location access, wait a moment, then tap Calculate again — or choose a manual start in Amsterdam."
             return
         }
         else if let chosen = selectedStart?.placemark.coordinate { start = chosen }
         else { routeError = "Choose a starting point or allow location access."; return }
-        isCalculating = true; defer { isCalculating = false }
+        isCalculating = true
+        routeError = nil
+        defer { isCalculating = false }
         let key = configuredValue("GRAPHHOPPER_API_KEY") ?? ProcessInfo.processInfo.environment["GRAPHHOPPER_API_KEY"]
         let baseString = configuredValue("GRAPHHOPPER_BASE_URL") ?? "https://graphhopper.com/api/1/route"
         guard let baseURL = URL(string: baseString) else { routeError = "GraphHopper base URL is invalid."; return }
@@ -254,7 +260,7 @@ struct BikeOSHomeView: View {
             route = try await GraphHopperRoutingService(baseURL: baseURL, apiKey: key).route(from: start, to: destination)
             routeError = nil
         } catch {
-            routeError = "Real bicycle routing is unavailable. Configure GraphHopper.xcconfig with an API key. The Amsterdam demo still works. (\(error.localizedDescription))"
+            routeError = error.localizedDescription
         }
     }
 

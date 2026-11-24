@@ -1,4 +1,5 @@
 // Copy this file to GraphHopper.xcconfig (ignored by git), then pass it to
 // xcodebuild with -xcconfig or select it as the scheme's configuration file.
 GRAPHHOPPER_API_KEY = replace_with_your_graphhopper_key
-GRAPHHOPPER_BASE_URL = https://graphhopper.com/api/1/route
+// The empty expansion keeps xcconfig's // comment parser from truncating the URL.
+GRAPHHOPPER_BASE_URL = https:/$()/graphhopper.com/api/1/route

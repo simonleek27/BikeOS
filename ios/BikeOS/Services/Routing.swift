@@ -114,13 +114,65 @@ struct MockRoutingService: BikeOSRoutingService {
 struct GraphHopperRoutingService: BikeOSRoutingService {
     let baseURL: URL; let apiKey: String?
     func route(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D) async throws -> BikeOSRoutePlan {
-        guard let apiKey, !apiKey.isEmpty else { throw URLError(.userAuthenticationRequired) }
-        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!; components.queryItems = [URLQueryItem(name: "point", value: "\(from.latitude),\(from.longitude)"), URLQueryItem(name: "point", value: "\(to.latitude),\(to.longitude)"), URLQueryItem(name: "key", value: apiKey), URLQueryItem(name: "type", value: "json"), URLQueryItem(name: "profile", value: "bike"), URLQueryItem(name: "points_encoded", value: "false"), URLQueryItem(name: "instructions", value: "true")]
-        let (data, response) = try await URLSession.shared.data(from: components.url!); guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
-        let decoded = try JSONDecoder().decode(GraphHopperResponse.self, from: data); guard let path = decoded.paths.first, path.points.coordinates.count >= 2 else { throw URLError(.cannotParseResponse) }
+        guard let apiKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines), !apiKey.isEmpty else {
+            throw GraphHopperRoutingError.missingAPIKey
+        }
+        guard baseURL.scheme?.lowercased() == "https", baseURL.host != nil else {
+            throw GraphHopperRoutingError.invalidEndpoint(baseURL.absoluteString)
+        }
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "point", value: "\(from.latitude),\(from.longitude)"),
+            URLQueryItem(name: "point", value: "\(to.latitude),\(to.longitude)"),
+            URLQueryItem(name: "key", value: apiKey),
+            URLQueryItem(name: "type", value: "json"),
+            URLQueryItem(name: "profile", value: "bike"),
+            URLQueryItem(name: "points_encoded", value: "false"),
+            URLQueryItem(name: "instructions", value: "true")
+        ]
+        guard let requestURL = components?.url else { throw GraphHopperRoutingError.invalidEndpoint(baseURL.absoluteString) }
+        var request = URLRequest(url: requestURL)
+        request.timeoutInterval = 20
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw GraphHopperRoutingError.invalidResponse }
+        guard http.statusCode == 200 else {
+            let message = (try? JSONDecoder().decode(GraphHopperErrorResponse.self, from: data))?.message
+            throw GraphHopperRoutingError.httpStatus(http.statusCode, message)
+        }
+        let decoded: GraphHopperResponse
+        do { decoded = try JSONDecoder().decode(GraphHopperResponse.self, from: data) }
+        catch { throw GraphHopperRoutingError.malformedResponse }
+        guard let path = decoded.paths.first, path.points.coordinates.count >= 2 else { throw GraphHopperRoutingError.noRoute }
         let points = path.points.coordinates.compactMap { pair -> CLLocationCoordinate2D? in guard pair.count >= 2 else { return nil }; return CLLocationCoordinate2D(latitude: pair[1], longitude: pair[0]) }; let routeID = BikeOSFrame.crc32(data)
+        guard points.count >= 2 else { throw GraphHopperRoutingError.noRoute }
         let maneuvers = path.instructions.enumerated().compactMap { index, instruction -> BikeOSManeuver? in guard let type = BikeOSManeuverType(graphHopperSign: instruction.sign), let pointIndex = instruction.interval.first else { return nil }; return BikeOSManeuver(id: index, pointIndex: min(pointIndex, points.count - 1), type: type, streetName: instruction.streetName ?? "", distanceM: instruction.distance) }
         return BikeOSRoutePlan(id: routeID, name: "Bike route", points: points, maneuvers: maneuvers, source: "GraphHopper", durationMin: max(1, Int(ceil(path.time / 60000))))
+    }
+}
+
+enum GraphHopperRoutingError: LocalizedError {
+    case missingAPIKey
+    case invalidEndpoint(String)
+    case invalidResponse
+    case httpStatus(Int, String?)
+    case malformedResponse
+    case noRoute
+
+    var errorDescription: String? {
+        switch self {
+        case .missingAPIKey:
+            return "GraphHopper API key is missing. Add it to ios/GraphHopper.xcconfig and rebuild the app."
+        case .invalidEndpoint(let value):
+            return "GraphHopper URL is invalid (\(value)). It must be https://graphhopper.com/api/1/route."
+        case .invalidResponse:
+            return "GraphHopper returned an invalid HTTP response. Check the iPhone internet connection."
+        case .httpStatus(let code, let message):
+            return "GraphHopper returned HTTP \(code).\(message.map { " \($0)" } ?? "")"
+        case .malformedResponse:
+            return "GraphHopper returned data BikeOS could not read. Check the routing API response format."
+        case .noRoute:
+            return "GraphHopper found no bicycle route between those locations. Choose closer or reachable points."
+        }
     }
 }
 
@@ -128,6 +180,7 @@ private struct GraphHopperResponse: Decodable { let paths: [GraphHopperPath] }
 private struct GraphHopperPath: Decodable { let time: Double; let points: GraphHopperPoints; let instructions: [GraphHopperInstruction] }
 private struct GraphHopperPoints: Decodable { let coordinates: [[Double]] }
 private struct GraphHopperInstruction: Decodable { let distance: Double; let sign: Int; let interval: [Int]; let streetName: String?; enum CodingKeys: String, CodingKey { case distance, sign, interval; case streetName = "street_name" } }
+private struct GraphHopperErrorResponse: Decodable { let message: String? }
 
 private extension BikeOSManeuverType {
     init?(graphHopperSign: Int) { switch graphHopperSign { case -98: self = .uTurn; case -3: self = .sharpLeft; case -2: self = .left; case -1: self = .slightLeft; case 0: self = .straight; case 1: self = .slightRight; case 2: self = .right; case 3: self = .sharpRight; case 6: self = .roundabout; case 4, 5, 7: self = .destination; default: return nil } }
