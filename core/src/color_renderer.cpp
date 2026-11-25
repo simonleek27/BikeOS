@@ -787,7 +787,8 @@ void ColorMapRenderer::render(Canvas565& canvas,
         if (input.eta_minutes_local >= 0 && input.eta_minutes_local < 1440) {
             char eta_clock[8]{};
             std::snprintf(eta_clock, sizeof(eta_clock), "%02d:%02d",
-                          input.eta_minutes_local / 60, input.eta_minutes_local % 60);
+                          static_cast<int>(input.eta_minutes_local / 60),
+                          static_cast<int>(input.eta_minutes_local % 60));
             eta_text = "Arrive " + std::string(eta_clock);
         } else if (time_known) {
             const auto seconds = static_cast<std::int64_t>(navigation.route_remaining_m / kCyclingSpeedMps);
