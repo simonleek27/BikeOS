@@ -31,6 +31,7 @@
 #include "bikeos/geo.hpp"
 #include "bikeos/gps.hpp"
 #include "bikeos/map_data.hpp"
+#include "bikeos/map_tiles.hpp"
 #include "bikeos/navigation.hpp"
 
 namespace {
@@ -85,10 +86,19 @@ public:
         if (!decode_map(read_binary(data_dir_ / "amsterdam_demo.bmap"), demo_map_)) {
             throw std::runtime_error("cannot load data/amsterdam_demo.bmap");
         }
+        // The city map the firmware reads from its "map" flash partition.
+        tile_blob_ = read_binary(data_dir_ / "amsterdam.btil");
+        if (!tile_blob_.empty() && !tiles_.open(tile_blob_)) {
+            std::cerr << "virtual screen engine: data/amsterdam.btil failed validation; using the demo map\n";
+        }
+        window_.set_archive(&tiles_);
         std::string error;
-        // Boot like the firmware: demo map and route loaded, ride not started.
-        if (!install(data_dir_ / "amsterdam_demo.brte", true, error)) throw std::runtime_error(error);
+        // Boot like the firmware: demo route loaded on the city tiles (or the
+        // embedded demo map without them), ride not started.
+        if (!install(data_dir_ / "amsterdam_demo.brte", !tiles_.is_open(), error)) throw std::runtime_error(error);
     }
+
+    const MapDataset& active_map() const { return use_tiles_ ? window_.map() : map_; }
 
     bool install(const std::filesystem::path& brte, const bool with_map, std::string& error)
     {
@@ -97,16 +107,21 @@ public:
             error = "route file is not a valid BRTE";
             return false;
         }
-        // Same as NavigationRuntime::install_bundle: a route-only bundle (what
-        // the app sends) keeps the map stored on the device, and a bundle with
-        // a map would replace it. Both use the bundled demo map here.
-        MapDataset map = demo_map_;
+        // Same as NavigationRuntime::install_bundle: a bundle with a map shows
+        // that map; a route-only bundle draws on the stored city tiles, or on
+        // the embedded demo map when there are none.
+        MapDataset map;
+        if (with_map || !tiles_.is_open()) map = demo_map_;
         if (!navigation_.set_route(candidate)) {
             error = "route failed validation";
             return false;
         }
+        map.revision = map_.revision + 1;
         map_ = std::move(map);
         route_ = std::move(candidate);
+        use_tiles_ = !with_map && tiles_.is_open();
+        if (use_tiles_) update_tiles(route_.points.front());
+        else window_.clear();
         route_.prepare_and_validate();
         filter_.reset();
         navigation_.set_phone_connected(phone_connected_);
@@ -174,6 +189,7 @@ public:
         navigation_.set_run_state(run_state == NavigationRunState::arrived ? NavigationRunState::running : run_state);
         filter_.reset();
         latest_ = navigation_.snapshot();
+        update_tiles(latest_.matched_position);
         force_step_ = true;
     }
 
@@ -194,7 +210,7 @@ public:
             stepped = true;
         }
         const auto started = std::chrono::steady_clock::now();
-        renderer_.render(canvas_, map_, route_.points, latest_,
+        renderer_.render(canvas_, active_map(), route_.points, latest_,
                          {.utc_epoch_ms = clock_ms(), .theme = theme_, .now_ms = smooth_ ? now_ms : 0});
         const double render_ms =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
@@ -242,6 +258,7 @@ public:
 
     std::string map_json() const
     {
+        if (tiles_.is_open()) return city_json();
         std::ostringstream out;
         out.setf(std::ios::fixed);
         out.precision(6);
@@ -282,6 +299,54 @@ public:
     }
 
 private:
+    // Overview of the whole city for the phone panel: main roads and larger
+    // water from every tile. Pieces cut at tile edges are drawn as they are.
+    std::string city_json() const
+    {
+        std::ostringstream out;
+        out.setf(std::ios::fixed);
+        out.precision(5);
+        const auto point = [&](const GeoPointE7 p) { out << '[' << p.latitude_e7 * 1e-7 << ',' << p.longitude_e7 * 1e-7 << ']'; };
+        const auto& grid = tiles_.grid();
+        out << "{\"city\":true,\"bounds\":[";
+        point(grid.origin);
+        out << ',';
+        point({grid.origin.latitude_e7 + grid.tile_lat_e7 * grid.rows, grid.origin.longitude_e7 + grid.tile_lon_e7 * grid.columns});
+        std::ostringstream roads;
+        std::ostringstream areas;
+        roads.setf(std::ios::fixed);
+        roads.precision(5);
+        areas.setf(std::ios::fixed);
+        areas.precision(5);
+        bool first_road = true;
+        bool first_area = true;
+        for (const auto& entry : tiles_.entries()) {
+            MapDataset tile;
+            if (!tiles_.load(entry.key, tile)) continue;
+            for (const auto& road : tile.roads) {
+                if (static_cast<int>(road.road_class) > 2) continue;
+                roads << (first_road ? "" : ",") << "{\"c\":" << static_cast<int>(road.road_class) << ",\"p\":[";
+                for (std::size_t i = 0; i < road.points.size(); ++i) {
+                    roads << (i ? "," : "") << '[' << road.points[i].latitude_e7 * 1e-7 << ',' << road.points[i].longitude_e7 * 1e-7 << ']';
+                }
+                roads << "]}";
+                first_road = false;
+            }
+            for (const auto& area : tile.areas) {
+                if (area.area_class != AreaClass::water || area.rings.front().size() < 8) continue;
+                areas << (first_area ? "" : ",") << "{\"c\":0,\"p\":[";
+                const auto& ring = area.rings.front();
+                for (std::size_t i = 0; i < ring.size(); ++i) {
+                    areas << (i ? "," : "") << '[' << ring[i].latitude_e7 * 1e-7 << ',' << ring[i].longitude_e7 * 1e-7 << ']';
+                }
+                areas << "]}";
+                first_area = false;
+            }
+        }
+        out << "],\"roads\":[" << roads.str() << "],\"areas\":[" << areas.str() << "]}";
+        return out.str();
+    }
+
     enum class ClockMode { live, fixed, none };
 
     // Wall-clock time the simulated GPS reports.
@@ -359,7 +424,18 @@ private:
         latest_ = navigation_.update(accepted, phone_connected_, now_ms);
         // Firmware pauses the simulator once the ride has arrived.
         if (latest_.run_state == NavigationRunState::arrived) auto_follow_ = false;
+        // Like the firmware: tiles load on the 1 Hz step, never mid-frame.
+        update_tiles(latest_.gps_valid ? latest_.position : latest_.matched_position);
         ++steps_;
+    }
+
+    void update_tiles(const GeoPointE7 position)
+    {
+        if (!use_tiles_) return;
+        const auto started = std::chrono::steady_clock::now();
+        if (window_.update(position)) {
+            tile_load_ms_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+        }
     }
 
     std::string status_json(const double render_ms, const bool stepped) const
@@ -377,6 +453,10 @@ private:
             << ",\"phone\":" << (phone_connected_ ? "true" : "false")
             << ",\"auto\":" << (auto_follow_ ? "true" : "false") << ",\"speed\":" << speed_mps_
             << ",\"with_map\":" << (route_with_map_ ? "true" : "false")
+            << ",\"map_source\":\"" << (use_tiles_ ? "city tiles" : "demo map") << '"'
+            << ",\"tiles_loaded\":" << (use_tiles_ ? window_.loaded_tiles().size() : 0)
+            << ",\"tiles_decoded\":" << window_.tiles_decoded() << ",\"tile_load_ms\":" << tile_load_ms_
+            << ",\"map_roads\":" << active_map().roads.size() << ",\"map_areas\":" << active_map().areas.size()
             << ",\"zoom\":" << renderer_.meters_per_pixel() << ",\"render_ms\":" << render_ms
             << ",\"stepped\":" << (stepped ? "true" : "false") << ",\"steps\":" << steps_
             << ",\"reroute_requested\":" << (n.reroute_requested ? "true" : "false");
@@ -408,6 +488,11 @@ private:
     std::filesystem::path data_dir_;
     MapDataset demo_map_;
     MapDataset map_;
+    std::vector<std::uint8_t> tile_blob_;
+    TileArchive tiles_;
+    TileWindow window_;
+    bool use_tiles_{};
+    double tile_load_ms_{};
     Route route_;
     NavigationEngine navigation_;
     GpsFilter filter_;

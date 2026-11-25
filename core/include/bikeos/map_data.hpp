@@ -48,6 +48,9 @@ struct MapDataset {
     GeoPointE7 maximum{};
     std::vector<RoadPolyline> roads;
     std::vector<AreaPolygon> areas;  // version 4 and later
+    // Not encoded. Bumped by whoever replaces the contents in place (the tile
+    // window), so caches keyed on this dataset know to rebuild.
+    std::uint32_t revision{};
 
     std::size_t point_count() const;
     bool valid() const;

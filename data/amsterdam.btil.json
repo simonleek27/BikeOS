@@ -1,0 +1,42 @@
+{
+  "source": "OpenStreetMap contributors via Geofabrik extract noord-holland.osm.pbf",
+  "license": "ODbL 1.0",
+  "license_url": "https://www.openstreetmap.org/copyright",
+  "generated_utc": "2026-11-24T18:37:35+00:00",
+  "osm_timestamp": "2026-11-23T21:21:17Z",
+  "bbox": [
+    52.2779,
+    4.7287,
+    52.4311,
+    5.1077
+  ],
+  "tile_m": 500.0,
+  "grid": {
+    "origin_e7": [
+      522779000,
+      47287000
+    ],
+    "tile_lat_e7": 44960,
+    "tile_lon_e7": 73620,
+    "columns": 52,
+    "rows": 35
+  },
+  "tiles": 1115,
+  "bytes": 3855225,
+  "tile_bytes": {
+    "min": 81,
+    "median": 3370,
+    "max": 15566
+  },
+  "road_pieces": 101855,
+  "area_pieces": 25450,
+  "road_points_by_class": {
+    "cycleway": 50687,
+    "footway": 115537,
+    "motorway": 2645,
+    "primary": 3449,
+    "residential": 49235,
+    "secondary": 20861,
+    "service": 42449
+  }
+}

@@ -1,5 +1,9 @@
-# Name,      Type, SubType, Offset,   Size,     Flags
-nvs,         data, nvs,     0x9000,   0x6000,
-phy_init,    data, phy,     0xf000,   0x1000,
-factory,     app,  factory, 0x10000,  0x400000,
-bikeos_map,  data, spiffs,   0x410000, 0xBF0000,
+# BikeOS partition table for the 16 MB ESP32-S3 module.
+# The app is about 0.7 MB; 4 MB leaves room to grow. The rest of flash holds
+# the tiled city map (BTIL, data/amsterdam.btil), flashed separately with
+# `idf.py map-flash` or esptool; see README.md.
+# Name,   Type, SubType, Offset,   Size
+nvs,      data, nvs,     0x9000,   0x6000
+phy_init, data, phy,     0xf000,   0x1000
+factory,  app,  factory, 0x10000,  0x3F0000
+map,      data, 0x40,    0x400000, 0xC00000

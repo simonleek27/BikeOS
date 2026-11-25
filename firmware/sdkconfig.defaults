@@ -2,15 +2,6 @@
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 
-# Reserve room for the map pack and keep the application image below 4 MiB.
-# The current pack is embedded for simple flashing; the data partition is
-# reserved for a future independent map-pack update.
-# CONFIG_PARTITION_TABLE_SINGLE_APP is not set
-CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
-CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
-CONFIG_PARTITION_TABLE_OFFSET=0x8000
-
 # The connected board uses the ESP32-S3 native USB Serial/JTAG interface.
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
@@ -54,3 +45,9 @@ CONFIG_COMPILER_OPTIMIZATION_PERF=y
 CONFIG_BIKEOS_GPS_SIM=y
 # CONFIG_BIKEOS_GPS_UART is not set
 # CONFIG_BIKEOS_GPS_IPHONE is not set
+
+# Custom partition table: 4 MB app plus a 12 MB "map" data partition for the
+# tiled city map (see partitions.csv and README.md).
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"

@@ -34,7 +34,7 @@ ls /dev/cu.usbmodem*
 Then flash and monitor, replacing the port if necessary:
 
 ```sh
-idf.py -p /dev/cu.usbmodem101 flash monitor
+idf.py -p /dev/cu.usbmodem1101 flash monitor
 ```
 
 Exit the monitor with `Ctrl-]`.
@@ -45,6 +45,36 @@ If auto-reset does not enter download mode: hold **BOOT**, tap and release
 Expected output includes BikeOS 0.5.0, ESP32-S3 diagnostics, map/route counts,
 navigation state, progress, cross-track and maneuver distances, framebuffer
 CRCs, reroute requests, and a heartbeat.
+
+## City map partition
+
+The firmware draws the map from the tiled Amsterdam map (`data/amsterdam.btil`)
+stored in its own 12 MB `map` flash partition at `0x400000`
+(`partitions.csv`). The phone only ever sends routes. If the partition is blank
+or fails its index CRC, the firmware logs it and falls back to the small demo
+map embedded in the app.
+
+`idf.py flash` writes the bootloader, partition table and app but never the
+map, so app updates stay fast. Flash the map once, and again whenever
+`data/amsterdam.btil` is rebuilt:
+
+```sh
+idf.py -p /dev/cu.usbmodem1101 map-flash
+```
+
+or with esptool directly (same result, no build needed):
+
+```sh
+python -m esptool --chip esp32s3 -p /dev/cu.usbmodem1101 -b 921600 write_flash 0x400000 ../data/amsterdam.btil
+```
+
+Switching an existing checkout to this partition table: the generated
+`sdkconfig` keeps the old single-app table until it is regenerated, so run
+`rm sdkconfig && idf.py build` (or set *Partition Table → Custom partition
+table CSV* to `partitions.csv` in menuconfig), then `idf.py flash` and
+`idf.py map-flash`. Boot logs `City map: N tiles ...` when the partition is
+in use and `Map tiles around c,r: decoded ...` each time the rider crosses
+into another tile.
 
 ## ILI9341 TFT and diagnostic mode
 

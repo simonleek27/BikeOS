@@ -1,6 +1,7 @@
 #include "navigation_runtime.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cinttypes>
 #include <cmath>
 #include <cstddef>
@@ -12,6 +13,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_partition.h"
 #include "esp_timer.h"
 #include "sdkconfig.h"
 
@@ -21,8 +23,8 @@
 #include "bikeos/gps.hpp"
 #include "bikeos/gps_simulator.hpp"
 #include "bikeos/map_data.hpp"
-#include "bikeos/map_pack.hpp"
 #include "bikeos/map_renderer.hpp"
+#include "bikeos/map_tiles.hpp"
 #include "bikeos/navigation.hpp"
 #include "bikeos/protocol.hpp"
 #include "ili9341_display.hpp"
@@ -33,8 +35,6 @@ extern const std::uint8_t amsterdam_demo_bmap_start[] asm("_binary_amsterdam_dem
 extern const std::uint8_t amsterdam_demo_bmap_end[] asm("_binary_amsterdam_demo_bmap_end");
 extern const std::uint8_t amsterdam_demo_brte_start[] asm("_binary_amsterdam_demo_brte_start");
 extern const std::uint8_t amsterdam_demo_brte_end[] asm("_binary_amsterdam_demo_brte_end");
-extern const std::uint8_t amsterdam_map_pack_start[] asm("_binary_amsterdam_map_pack_start");
-extern const std::uint8_t amsterdam_map_pack_end[] asm("_binary_amsterdam_map_pack_end");
 
 namespace bikeos {
 namespace {
@@ -64,15 +64,40 @@ std::span<const std::uint8_t> embedded_asset(const std::uint8_t* begin, const st
     return {begin, static_cast<std::size_t>(end - begin)};
 }
 
+// Decoded tile features are thousands of small vectors and strings. Below
+// CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL they would all land in internal RAM,
+// which BLE, task stacks and DMA need, so steer them to PSRAM while the tile
+// window rebuilds.
+class PsramForSmallAllocations {
+public:
+    PsramForSmallAllocations()
+    {
+#if CONFIG_SPIRAM_USE_MALLOC
+        heap_caps_malloc_extmem_enable(16);
+#endif
+    }
+    ~PsramForSmallAllocations()
+    {
+#if CONFIG_SPIRAM_USE_MALLOC
+        heap_caps_malloc_extmem_enable(CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL);
+#endif
+    }
+    PsramForSmallAllocations(const PsramForSmallAllocations&) = delete;
+    PsramForSmallAllocations& operator=(const PsramForSmallAllocations&) = delete;
+};
+
 }  // namespace
 
 struct NavigationRuntime::State {
     mutable std::mutex mutex;
+    // Static map: the embedded demo map, or one that came with a BLE bundle.
     MapDataset map;
-    MapTilePack map_pack;
-    bool map_pack_ready{};
-    GeoPointE7 last_map_center{};
-    bool have_map_center{};
+    // City map from the "map" flash partition, memory-mapped; only the 3x3
+    // tiles around the rider are decoded, into tile_window.map().
+    TileArchive tiles;
+    TileWindow tile_window;
+    esp_partition_mmap_handle_t tiles_mapping{};
+    bool use_tiles{};
     Route route;
     GpsSimulator simulator{0xB14E05U};
     GpsFilter filter;
@@ -104,16 +129,76 @@ struct NavigationRuntime::State {
     bool simulation_paused{};
     bool phone_connected{};
     bool reroute_pending{};
+
+    const MapDataset& active_map() const { return use_tiles ? tile_window.map() : map; }
+    // Loads the tiles around `position` when the rider has moved into another tile.
+    void update_tiles(GeoPointE7 position);
+    bool open_tile_partition();
 };
+
+bool NavigationRuntime::State::open_tile_partition()
+{
+    const esp_partition_t* partition =
+        esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "map");
+    if (partition == nullptr) {
+        ESP_LOGW(kTag, "No \"map\" partition; using the embedded demo map");
+        return false;
+    }
+    std::array<std::uint8_t, TileArchive::header_size> header{};
+    if (esp_partition_read(partition, 0, header.data(), header.size()) != ESP_OK) return false;
+    const std::size_t size = TileArchive::declared_size(header);
+    if (size == 0 || size > partition->size) {
+        ESP_LOGW(kTag, "Map partition is empty or not BTIL; using the embedded demo map (flash it with idf.py map-flash)");
+        return false;
+    }
+    const void* mapped = nullptr;
+    if (esp_partition_mmap(partition, 0, size, ESP_PARTITION_MMAP_DATA, &mapped, &tiles_mapping) != ESP_OK) {
+        ESP_LOGE(kTag, "Could not memory-map %u bytes of the map partition", static_cast<unsigned>(size));
+        return false;
+    }
+    if (!tiles.open({static_cast<const std::uint8_t*>(mapped), size})) {
+        ESP_LOGE(kTag, "Map partition failed validation (header or index CRC); using the embedded demo map");
+        esp_partition_munmap(tiles_mapping);
+        tiles_mapping = {};
+        return false;
+    }
+    tile_window.set_archive(&tiles);
+    const auto& grid = tiles.grid();
+    ESP_LOGI(kTag, "City map: %u tiles, %ux%u grid, %u bytes at flash 0x%" PRIx32,
+             static_cast<unsigned>(tiles.tile_count()), grid.columns, grid.rows, static_cast<unsigned>(size),
+             partition->address);
+    return true;
+}
+
+void NavigationRuntime::State::update_tiles(const GeoPointE7 position)
+{
+    if (!use_tiles || !valid_coordinate(position)) return;
+    const std::int64_t start_us = esp_timer_get_time();
+    const std::uint32_t decoded_before = tile_window.tiles_decoded();
+    bool changed = false;
+    {
+        PsramForSmallAllocations psram;
+        changed = tile_window.update(position);
+    }
+    if (!changed) return;
+    const auto centre = *tile_window.centre();
+    ESP_LOGI(kTag, "Map tiles around %u,%u: decoded %" PRIu32 " (failed %" PRIu32 "), %u roads %u areas, %.1f ms, "
+             "internal free %u",
+             centre.column, centre.row, tile_window.tiles_decoded() - decoded_before, tile_window.tiles_failed(),
+             static_cast<unsigned>(tile_window.map().roads.size()), static_cast<unsigned>(tile_window.map().areas.size()),
+             static_cast<double>(esp_timer_get_time() - start_us) / 1000.0,
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
+}
 
 bool NavigationRuntime::initialize()
 {
     auto state = std::make_unique<State>();
     const auto map_bytes = embedded_asset(amsterdam_demo_bmap_start, amsterdam_demo_bmap_end);
     const auto route_bytes = embedded_asset(amsterdam_demo_brte_start, amsterdam_demo_brte_end);
-    const auto map_pack_bytes = embedded_asset(amsterdam_map_pack_start, amsterdam_map_pack_end);
-    state->map_pack_ready = state->map_pack.open(map_pack_bytes);
-    if (!decode_map(map_bytes, state->map)) {
+    // Prefer the city map in flash; the embedded demo map is the fallback
+    // when the partition is missing, blank or corrupt.
+    state->use_tiles = state->open_tile_partition();
+    if (!state->use_tiles && !decode_map(map_bytes, state->map)) {
         ESP_LOGE(kTag, "Map validation failed (%u bytes)", static_cast<unsigned>(map_bytes.size()));
         return false;
     }
@@ -125,14 +210,7 @@ bool NavigationRuntime::initialize()
         ESP_LOGE(kTag, "Navigation initialization failed");
         return false;
     }
-    if (state->map_pack_ready) {
-        MapDataset nearby;
-        if (state->map_pack.decode_nearby(state->route.points.front(), 900.0F, nearby)) {
-            state->map = std::move(nearby);
-            state->last_map_center = state->route.points.front();
-            state->have_map_center = true;
-        }
-    }
+    state->update_tiles(state->route.points.front());
 #if CONFIG_BIKEOS_GPS_SIM
     if (!state->simulator.set_route(state->route)) return false;
     state->simulation_paused = true;
@@ -196,12 +274,10 @@ bool NavigationRuntime::initialize()
     state->canvas = std::make_unique<Canvas565>();
 #endif
     ESP_LOGI(kTag,
-             "OSM map ready: %u roads %u points %u bytes; pack=%s (%u tiles); route=%" PRIu32 " %.0fm %u points",
-             static_cast<unsigned>(state->map.roads.size()),
-             static_cast<unsigned>(state->map.point_count()),
-             static_cast<unsigned>(map_bytes.size()),
-             state->map_pack_ready ? "ready" : "fallback",
-             static_cast<unsigned>(state->map_pack.tile_count()),
+             "OSM map ready (%s): %u roads %u points; route=%" PRIu32 " %.0fm %u points",
+             state->use_tiles ? "city tiles" : "embedded demo",
+             static_cast<unsigned>(state->active_map().roads.size()),
+             static_cast<unsigned>(state->active_map().point_count()),
              state->route.route_id,
              state->route.total_distance_m,
              static_cast<unsigned>(state->route.points.size()));
@@ -244,22 +320,11 @@ void NavigationRuntime::step(const std::uint64_t now_ms)
 #endif
     std::optional<GpsFix> accepted;
     if (candidate) accepted = state_->filter.accept(*candidate);
-    if (accepted && state_->map_pack_ready &&
-        (!state_->have_map_center || distance_m(state_->last_map_center, accepted->position) > 350.0)) {
-        MapDataset nearby;
-        if (state_->map_pack.decode_nearby(accepted->position, 900.0F, nearby)) {
-            state_->map = std::move(nearby);
-            state_->last_map_center = accepted->position;
-            state_->have_map_center = true;
-            ESP_LOGI(kTag, "Loaded nearby map tiles at %" PRId32 ",%" PRId32,
-                     accepted->position.latitude_e7, accepted->position.longitude_e7);
-        } else {
-            ESP_LOGW(kTag, "No offline map tile covers %" PRId32 ",%" PRId32,
-                     accepted->position.latitude_e7, accepted->position.longitude_e7);
-        }
-    }
     const auto navigation = state_->navigation.update(accepted, state_->phone_connected, now_ms);
     if (navigation.run_state == NavigationRunState::arrived) state_->simulation_paused = true;
+    // Tile loading runs here, once a second, not in render_frame(): crossing
+    // a tile edge decodes at most three new tiles (a few ms) and delays one frame.
+    state_->update_tiles(navigation.gps_valid ? navigation.position : navigation.matched_position);
     if (accepted && accepted->utc_epoch_ms != 0) {
         state_->utc_epoch_ms = accepted->utc_epoch_ms;
         state_->utc_epoch_received_ms = uptime_ms();
@@ -272,7 +337,7 @@ void NavigationRuntime::step(const std::uint64_t now_ms)
 #else
     const GeoPointE7 center = navigation.gps_valid ? navigation.position : navigation.matched_position;
     state_->renderer.render(state_->framebuffer,
-                            state_->map,
+                            state_->active_map(),
                             state_->route.points,
                             navigation,
                             {.center = valid_coordinate(center) ? center : state_->route.points.front(),
@@ -320,7 +385,7 @@ void NavigationRuntime::render_frame(const std::uint64_t frame_ms)
                                      : state_->utc_epoch_ms +
                                            static_cast<std::int64_t>(now_ms - state_->utc_epoch_received_ms);
     const std::int64_t render_start_us = esp_timer_get_time();
-    state_->color_renderer.render(*state_->canvas, state_->map, state_->route.points, state_->latest,
+    state_->color_renderer.render(*state_->canvas, state_->active_map(), state_->route.points, state_->latest,
                                   {.utc_epoch_ms = utc_now, .now_ms = frame_ms});
     const std::int64_t flush_start_us = esp_timer_get_time();
     if (!state_->ili9341_display->flush(*state_->canvas)) {
@@ -426,23 +491,30 @@ protocol::ResultCode NavigationRuntime::install_bundle(const std::uint32_t bundl
         candidate_route.route_id != begin.route_id) {
         return protocol::ResultCode::invalid_bundle;
     }
+    // Custom routes are route-only bundles. Require every route point to be
+    // inside a real BTIL tile so we never accept a route and silently render
+    // stale or unrelated demo streets around it.
     if (route_only) {
-        // Custom routes use the local tiled map pack. Do not silently fall
-        // back to the small demo rectangle for an unrelated route.
-        if (!state_->map_pack_ready ||
-            !std::all_of(candidate_route.points.begin(), candidate_route.points.end(),
-                         [&](const GeoPointE7 point) { return state_->map_pack.covers(point); }) ||
-            !state_->map_pack.decode_nearby(candidate_route.points.front(), 900.0F, candidate_map)) {
-            ESP_LOGW(kTag, "Route %" PRIu32 " is outside offline map coverage", candidate_route.route_id);
+        if (!state_->tiles.is_open() ||
+            !std::all_of(candidate_route.points.begin(), candidate_route.points.end(), [&](const GeoPointE7 point) {
+                const auto key = state_->tiles.grid().key_for(point);
+                return state_->tiles.grid().contains(point) && key.has_value() && state_->tiles.find(*key) != nullptr;
+            })) {
+            ESP_LOGW(kTag, "Route %" PRIu32 " is outside BTIL map coverage", candidate_route.route_id);
             return protocol::ResultCode::invalid_bundle;
         }
     }
     std::scoped_lock lock(state_->mutex);
     if (!state_->navigation.set_route(candidate_route)) return protocol::ResultCode::invalid_bundle;
-    state_->map = std::move(candidate_map);
+    candidate_map.revision = state_->map.revision + 1;
+    state_->map = std::move(candidate_map);  // empty when the tiles take over
     state_->route = std::move(candidate_route);
-    state_->last_map_center = state_->route.points.front();
-    state_->have_map_center = true;
+    state_->use_tiles = route_only && state_->tiles.is_open();
+    if (state_->use_tiles) {
+        state_->update_tiles(state_->route.points.front());
+    } else {
+        state_->tile_window.clear();  // free the decoded tiles while a bundled map is shown
+    }
 #if CONFIG_BIKEOS_GPS_SIM
     if (!state_->simulator.set_route(state_->route)) return protocol::ResultCode::invalid_bundle;
     state_->simulator.set_speed_mps(kDemoSpeedMps);

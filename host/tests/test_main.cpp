@@ -21,6 +21,7 @@
 #include "bikeos/map_data.hpp"
 #include "bikeos/map_pack.hpp"
 #include "bikeos/map_renderer.hpp"
+#include "bikeos/map_tiles.hpp"
 #include "bikeos/navigation.hpp"
 #include "bikeos/nmea.hpp"
 #include "bikeos/protocol.hpp"
@@ -664,6 +665,322 @@ void test_color_renderer()
     CHECK(canvas.pixel(fresh.card_rect().x + 20, fresh.card_rect().y + 3) == bikeos::rgb565(0xFB, 0xD0, 0xD0));
 }
 
+
+std::vector<std::uint8_t> read_file(const std::filesystem::path& path)
+{
+    std::ifstream input(path, std::ios::binary);
+    return std::vector<std::uint8_t>(std::istreambuf_iterator<char>(input), {});
+}
+
+// 500 m tiles around the demo map, with sizes on the 20 E7 grid like the tool.
+bikeos::TileGrid demo_grid(const bikeos::MapDataset& map)
+{
+    bikeos::TileGrid grid{
+        .origin = {(map.minimum.latitude_e7 - 60000) / 20 * 20, (map.minimum.longitude_e7 - 60000) / 20 * 20},
+        .tile_lat_e7 = 44960,
+        .tile_lon_e7 = 73640,
+        .columns = 0,
+        .rows = 0,
+    };
+    grid.rows = static_cast<std::uint16_t>((map.maximum.latitude_e7 + 60000 - grid.origin.latitude_e7) / grid.tile_lat_e7 + 1);
+    grid.columns = static_cast<std::uint16_t>((map.maximum.longitude_e7 + 60000 - grid.origin.longitude_e7) / grid.tile_lon_e7 + 1);
+    return grid;
+}
+
+bool within(const bikeos::GeoPointE7 point, const bikeos::GeoPointE7 low, const bikeos::GeoPointE7 high, const int slack = 0)
+{
+    return point.latitude_e7 >= low.latitude_e7 - slack && point.latitude_e7 <= high.latitude_e7 + slack &&
+           point.longitude_e7 >= low.longitude_e7 - slack && point.longitude_e7 <= high.longitude_e7 + slack;
+}
+
+void test_tile_grid_and_selection()
+{
+    const bikeos::TileGrid grid{.origin = {523000000, 48000000}, .tile_lat_e7 = 44960, .tile_lon_e7 = 73640,
+                                .columns = 10, .rows = 8};
+    CHECK(grid.valid());
+    CHECK(!bikeos::TileGrid{}.valid());
+    const auto key = grid.key_for({523000000 + 44960 * 3 + 5, 48000000 + 73640 * 7 + 73639});
+    CHECK(key && key->column == 7 && key->row == 3);
+    // Points off the grid clamp to the nearest edge cell.
+    const auto south_west = grid.key_for({522000000, 47000000});
+    CHECK(south_west && south_west->column == 0 && south_west->row == 0);
+    const auto north_east = grid.key_for({530000000, 50000000});
+    CHECK(north_east && north_east->column == 9 && north_east->row == 7);
+    CHECK(grid.contains({523000000, 48000000}) && !grid.contains({523000000 + 44960 * 8, 48000000}));
+    // A tile's maximum is the next tile's minimum, so edges are shared exactly.
+    CHECK((grid.tile_maximum({2, 3}) == bikeos::GeoPointE7{grid.tile_minimum({3, 4}).latitude_e7,
+                                                            grid.tile_minimum({3, 4}).longitude_e7}));
+    CHECK((grid.tile_centre({0, 0}) == bikeos::GeoPointE7{523000000 + 22480, 48000000 + 36820}));
+
+    const auto inner = bikeos::tiles_around(grid, {4, 4});
+    CHECK(inner.size() == 9);
+    CHECK((inner.front() == bikeos::TileKey{3, 3}) && (inner.back() == bikeos::TileKey{5, 5}));
+    CHECK(std::is_sorted(inner.begin(), inner.end()));
+    CHECK(bikeos::tiles_around(grid, {0, 0}).size() == 4);   // corner
+    CHECK(bikeos::tiles_around(grid, {9, 3}).size() == 6);   // east edge
+    CHECK(bikeos::tiles_around(grid, {4, 4}, 0).size() == 1);
+}
+
+void test_tile_edge_clipping()
+{
+    const bikeos::GeoPointE7 low{523000000, 48000000};
+    const bikeos::GeoPointE7 high{523045000, 48073000};
+    const bikeos::GeoPointE7 east_high{523045000, 48146000};
+    // Crosses the east edge into the neighbour: both halves end on the edge at the same point.
+    const std::vector<bikeos::GeoPointE7> line{{523010000, 47990000}, {523020000, 48100000}};
+    const auto west_pieces = bikeos::clip_polyline(line, low, high);
+    const auto east_pieces = bikeos::clip_polyline(line, {low.latitude_e7, high.longitude_e7}, east_high);
+    CHECK(west_pieces.size() == 1 && east_pieces.size() == 1);
+    CHECK(west_pieces[0].front().longitude_e7 == low.longitude_e7);
+    CHECK(west_pieces[0].back().longitude_e7 == high.longitude_e7);
+    CHECK(west_pieces[0].back() == east_pieces[0].front());
+    CHECK(east_pieces[0].back() == line.back());
+    // Leaves through the north edge and comes back: two pieces.
+    const std::vector<bikeos::GeoPointE7> loop{
+        {523030000, 48010000}, {523060000, 48020000}, {523060000, 48050000}, {523030000, 48060000}};
+    const auto loop_pieces = bikeos::clip_polyline(loop, low, high);
+    CHECK(loop_pieces.size() == 2);
+    for (const auto& piece : loop_pieces) {
+        CHECK(std::all_of(piece.begin(), piece.end(), [&](const auto p) { return within(p, low, high); }));
+    }
+    CHECK(loop_pieces[0].back().latitude_e7 == high.latitude_e7);
+    CHECK(loop_pieces[1].front().latitude_e7 == high.latitude_e7);
+    // Entirely outside, and entirely inside.
+    CHECK(bikeos::clip_polyline(std::vector<bikeos::GeoPointE7>{{523100000, 48000000}, {523100000, 48070000}}, low, high).empty());
+    const std::vector<bikeos::GeoPointE7> inside{{523010000, 48010000}, {523020000, 48020000}, {523030000, 48010000}};
+    const auto kept = bikeos::clip_polyline(inside, low, high);
+    CHECK(kept.size() == 1 && kept[0] == inside);
+
+    // A square over the corner of four tiles: the pieces tile the square.
+    const std::vector<bikeos::GeoPointE7> square{
+        {523030000, 48050000}, {523030000, 48100000}, {523060000, 48100000}, {523060000, 48050000}};
+    const auto shoelace = [](const std::vector<bikeos::GeoPointE7>& ring) {
+        double sum = 0.0;
+        for (std::size_t i = 0; i < ring.size(); ++i) {
+            const auto a = ring[i];
+            const auto b = ring[(i + 1) % ring.size()];
+            sum += static_cast<double>(a.longitude_e7) * b.latitude_e7 - static_cast<double>(b.longitude_e7) * a.latitude_e7;
+        }
+        return std::abs(sum) / 2.0;
+    };
+    double pieces_area = 0.0;
+    for (const int row : {0, 1}) {
+        for (const int column : {0, 1}) {
+            const bikeos::GeoPointE7 tile_low{low.latitude_e7 + 45000 * row, low.longitude_e7 + 73000 * column};
+            const bikeos::GeoPointE7 tile_high{tile_low.latitude_e7 + 45000, tile_low.longitude_e7 + 73000};
+            const auto clipped = bikeos::clip_ring(square, tile_low, tile_high);
+            CHECK(clipped.size() >= 4);
+            CHECK(std::all_of(clipped.begin(), clipped.end(), [&](const auto p) { return within(p, tile_low, tile_high); }));
+            pieces_area += shoelace(clipped);
+        }
+    }
+    CHECK(std::abs(pieces_area - shoelace(square)) < 1.0);
+    CHECK(bikeos::clip_ring(square, {523100000, 48000000}, {523145000, 48073000}).empty());
+    CHECK(bikeos::clip_ring(inside, low, high) == inside);
+}
+
+void test_tile_archive_codec()
+{
+    bikeos::MapDataset demo;
+    CHECK(bikeos::decode_map(read_file(BIKEOS_SOURCE_DIR "/data/amsterdam_demo.bmap"), demo));
+    const auto grid = demo_grid(demo);
+    auto tiles = bikeos::split_into_tiles(demo, grid);
+    CHECK(tiles.size() >= 6);
+    for (const auto& [key, tile] : tiles) {
+        CHECK(tile.valid());
+        CHECK(tile.minimum == grid.tile_minimum(key));
+        for (const auto& road : tile.roads) {
+            CHECK(std::all_of(road.points.begin(), road.points.end(),
+                              [&](const auto p) { return within(p, tile.minimum, tile.maximum); }));
+        }
+    }
+    const auto blob = bikeos::encode_tile_archive(grid, tiles);
+    CHECK(!blob.empty());
+    CHECK(bikeos::TileArchive::declared_size(blob) == blob.size());
+
+    bikeos::TileArchive archive;
+    CHECK(archive.open(blob));
+    CHECK(archive.tile_count() == tiles.size());
+    CHECK(archive.grid().tile_lat_e7 == grid.tile_lat_e7 && archive.grid().columns == grid.columns);
+    std::size_t roads = 0;
+    for (const auto& [key, tile] : tiles) {
+        const auto* entry = archive.find(key);
+        CHECK(entry != nullptr && entry->size > 48);
+        bikeos::MapDataset decoded;
+        CHECK(archive.load(key, decoded));
+        CHECK(decoded.roads.size() == tile.roads.size() && decoded.areas.size() == tile.areas.size());
+        CHECK(decoded.origin == grid.tile_centre(key));
+        roads += decoded.roads.size();
+    }
+    CHECK(roads >= demo.roads.size());  // roads crossing an edge are split, never lost
+    CHECK(archive.find({static_cast<std::uint16_t>(grid.columns + 1), 0}) == nullptr);
+
+    // A partition is larger than the blob: trailing erased flash is ignored.
+    auto padded = blob;
+    padded.resize(blob.size() + 4096, 0xFF);
+    CHECK(archive.open(padded) && archive.tile_count() == tiles.size());
+    // Damage to the index fails the open; damage to a tile fails only that tile.
+    auto bad_index = blob;
+    bad_index[bikeos::TileArchive::header_size + 5] ^= 0x40U;
+    CHECK(!archive.open(bad_index) && !archive.is_open());
+    auto bad_tile = blob;
+    CHECK(archive.open(blob));
+    const auto first = archive.entries().front();
+    bad_tile[first.offset + first.size - 1] ^= 0x01U;
+    bikeos::TileArchive damaged;
+    CHECK(damaged.open(bad_tile));
+    bikeos::MapDataset scratch;
+    CHECK(!damaged.load(first.key, scratch));
+    CHECK(damaged.load(damaged.entries().back().key, scratch));
+    CHECK(!archive.open(std::span(blob).first(blob.size() - 1)));
+    std::vector<std::uint8_t> erased(4096, 0xFF);
+    CHECK(!archive.open(erased) && bikeos::TileArchive::declared_size(erased) == 0);
+}
+
+void test_tile_window()
+{
+    bikeos::MapDataset demo;
+    bikeos::Route route;
+    CHECK(bikeos::decode_map(read_file(BIKEOS_SOURCE_DIR "/data/amsterdam_demo.bmap"), demo));
+    CHECK(bikeos::decode_route(read_file(BIKEOS_SOURCE_DIR "/data/amsterdam_demo.brte"), route));
+    const auto grid = demo_grid(demo);
+    const auto blob = bikeos::encode_tile_archive(grid, bikeos::split_into_tiles(demo, grid));
+    bikeos::TileArchive archive;
+    CHECK(archive.open(blob));
+
+    bikeos::TileWindow window;
+    CHECK(!window.update(route.points.front()));  // no archive yet
+    window.set_archive(&archive);
+    const auto start = route.points.front();
+    CHECK(window.update(start));
+    const auto centre = grid.key_for(start);
+    CHECK(window.centre() == centre);
+    const auto loaded = window.loaded_tiles();
+    CHECK(loaded.size() <= 9 && loaded.size() >= 4);
+    CHECK(std::all_of(loaded.begin(), loaded.end(), [&](const auto key) {
+        return std::abs(key.column - centre->column) <= 1 && std::abs(key.row - centre->row) <= 1;
+    }));
+    CHECK(window.tiles_decoded() == loaded.size());
+    CHECK(window.map().valid());
+    CHECK(!window.map().roads.empty());
+    const auto revision = window.map().revision;
+    // Small moves inside the centre tile do nothing.
+    CHECK(!window.update(offset(start, 5, 5)));
+    CHECK(window.map().revision == revision);
+
+    // Ride one tile east, past the hysteresis margin: only the new column is decoded.
+    const auto low = grid.tile_minimum(*centre);
+    const bikeos::GeoPointE7 east{start.latitude_e7, low.longitude_e7 + grid.tile_lon_e7 + grid.tile_lon_e7 / 2};
+    const auto before = window.tiles_decoded();
+    CHECK(window.update(east));
+    CHECK(window.map().revision == revision + 1);
+    CHECK(window.centre()->column == centre->column + 1);
+    CHECK(window.tiles_decoded() - before <= 3);
+    // Just back over the edge, inside the margin: the window stays put.
+    const bikeos::GeoPointE7 edge{start.latitude_e7, low.longitude_e7 + grid.tile_lon_e7 - 200};
+    CHECK(!window.update(edge));
+    CHECK(window.centre()->column == centre->column + 1);
+
+    // Every feature in the window comes from a 3x3 block, and the window draws streets.
+    const auto block_low = grid.tile_minimum({static_cast<std::uint16_t>(window.centre()->column - 1),
+                                              static_cast<std::uint16_t>(window.centre()->row - 1)});
+    const auto block_high = grid.tile_maximum({static_cast<std::uint16_t>(window.centre()->column + 1),
+                                               static_cast<std::uint16_t>(window.centre()->row + 1)});
+    for (const auto& road : window.map().roads) {
+        CHECK(std::all_of(road.points.begin(), road.points.end(),
+                          [&](const auto p) { return within(p, block_low, block_high); }));
+    }
+    bikeos::NavigationEngine navigation;
+    CHECK(navigation.set_route(route));
+    window.clear();
+    CHECK(window.update(start));
+    const auto snapshot = navigation.update(fix_at(start, 1000), true, 1000);
+    bikeos::Canvas565 tiled_canvas;
+    bikeos::Canvas565 demo_canvas;
+    bikeos::ColorMapRenderer tiled_renderer;
+    bikeos::ColorMapRenderer demo_renderer;
+    tiled_renderer.render(tiled_canvas, window.map(), route.points, snapshot, {.theme = bikeos::ThemeMode::day});
+    demo_renderer.render(demo_canvas, demo, route.points, snapshot, {.theme = bikeos::ThemeMode::day});
+    std::size_t differ = 0;
+    for (std::size_t i = 0; i < tiled_canvas.pixels().size(); ++i) {
+        differ += tiled_canvas.pixels()[i] != demo_canvas.pixels()[i] ? 1U : 0U;
+    }
+    // Same streets either way; only anti-aliasing at a few cut points may differ.
+    CHECK(differ < tiled_canvas.pixels().size() / 100);
+
+    window.clear();
+    CHECK(window.map().roads.empty() && !window.centre());
+}
+
+void test_city_tile_asset()
+{
+    const std::filesystem::path path = BIKEOS_SOURCE_DIR "/data/amsterdam.btil";
+    if (!std::filesystem::exists(path)) {
+        std::cerr << "skipping city tiles: data/amsterdam.btil not built\n";
+        return;
+    }
+    const auto blob = read_file(path);
+    bikeos::TileArchive archive;
+    CHECK(archive.open(blob));
+    CHECK(archive.tile_count() > 300);
+    CHECK(blob.size() < 12U * 1024U * 1024U);  // fits the map partition
+    const auto& grid = archive.grid();
+    // ~500 m tiles.
+    CHECK(std::abs(grid.tile_lat_e7 * 1.0e-7 * 111195.0 - 500.0) < 5.0);
+    // Every tile decodes and stays inside its cell; road cuts on an east edge
+    // continue in the east neighbour from the same point.
+    std::size_t cut_points = 0;
+    std::size_t matched = 0;
+    for (const auto& entry : archive.entries()) {
+        bikeos::MapDataset tile;
+        CHECK(archive.load(entry.key, tile));
+        CHECK(tile.origin == grid.tile_centre(entry.key));
+        const auto low = grid.tile_minimum(entry.key);
+        const auto high = grid.tile_maximum(entry.key);
+        for (const auto& road : tile.roads) {
+            CHECK(std::all_of(road.points.begin(), road.points.end(), [&](const auto p) { return within(p, low, high, 10); }));
+        }
+        for (const auto& area : tile.areas) {
+            for (const auto& ring : area.rings) {
+                CHECK(std::all_of(ring.begin(), ring.end(), [&](const auto p) { return within(p, low, high, 10); }));
+            }
+        }
+        if (entry.key.column + 1 >= grid.columns || (entry.key.row % 7) != 3) continue;  // sample rows
+        bikeos::MapDataset east;
+        if (!archive.load({static_cast<std::uint16_t>(entry.key.column + 1), entry.key.row}, east)) continue;
+        for (const auto& road : tile.roads) {
+            for (const auto end : {road.points.front(), road.points.back()}) {
+                if (end.longitude_e7 != high.longitude_e7) continue;
+                // A road that simply ends on (or within 5 E7 of) the edge looks like a cut but is not one.
+                const bool continues = std::any_of(east.roads.begin(), east.roads.end(),
+                                                   [&](const auto& other) { return other.feature_id == road.feature_id; });
+                if (!continues) continue;
+                ++cut_points;
+                matched += std::any_of(east.roads.begin(), east.roads.end(), [&](const auto& other) {
+                    return other.feature_id == road.feature_id &&
+                           (other.points.front() == end || other.points.back() == end);
+                }) ? 1U : 0U;
+            }
+        }
+    }
+    CHECK(cut_points > 50);
+    // Real cuts always match; the few exceptions are OSM ways that happen to end exactly on an
+    // edge they also cross elsewhere (1 of 1,308 sampled cuts in the 2026-11 extract).
+    CHECK(matched * 200 >= cut_points * 199);
+    std::printf("city tiles: %zu of %zu east-edge cuts matched\n", matched, cut_points);
+
+    // Far from the demo map: Amsterdam Centraal and the Amsterdamse Bos both have streets, and water or parks.
+    for (const bikeos::GeoPointE7 place : {bikeos::GeoPointE7{523791000, 49003000}, bikeos::GeoPointE7{523300000, 48300000}}) {
+        bikeos::TileWindow window;
+        window.set_archive(&archive);
+        CHECK(window.update(place));
+        CHECK(window.loaded_tiles().size() == 9);
+        CHECK(window.map().valid());
+        CHECK(window.map().roads.size() > 100);
+        CHECK(!window.map().areas.empty());
+    }
+}
+
 }  // namespace
 
 int main()
@@ -682,6 +999,11 @@ int main()
     test_canvas_and_fonts();
     test_time_and_theme();
     test_color_renderer();
+    test_tile_grid_and_selection();
+    test_tile_edge_clipping();
+    test_tile_archive_codec();
+    test_tile_window();
+    test_city_tile_asset();
     if (failures != 0) {
         std::cerr << failures << " test assertion(s) failed\n";
         return EXIT_FAILURE;
