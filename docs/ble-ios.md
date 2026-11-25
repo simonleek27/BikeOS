@@ -20,11 +20,11 @@ confirmation. While paused, the simulator stops advancing, reports speed 0, and
 continues sending status notifications.
 
 Custom routes are sent as route-only bundles (`map_size = 0`). The firmware
-checks them against the offline Amsterdam tile pack, then loads a nearby working
-window from flash. That window follows the actual ESP32 GPS position, not just
-the planned route, so nearby streets continue to render when the rider goes
-off-route. Routes outside pack coverage are rejected clearly. BRTE v2 is chosen
-automatically for long routes.
+checks every route point against the offline Amsterdam BTIL archive, then loads
+a nearby 3×3 working window from flash. That window follows the actual ESP32
+GPS position, not just the planned route, so nearby streets continue to render
+when the rider goes off-route. Routes outside BTIL coverage are rejected
+clearly. BRTE v2 is chosen automatically for long routes.
 
 The iPhone remembers the last peripheral and automatically retries after a
 disconnect or Bluetooth power cycle. It re-discovers characteristics and waits

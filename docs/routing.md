@@ -30,10 +30,11 @@ retains the same maneuver records and CRC, and is accepted by both Swift and
 firmware decoders. Encoded routes remain limited to 512 KiB.
 
 The Amsterdam demo can send its checked-in BMAP. A custom route sends a
-route-only bundle (`map_size = 0`); the ESP32 validates it against the offline
-Amsterdam tile pack, draws it over those streets, and refreshes the working
-tiles around the actual GPS position. Roads therefore remain visible after the
-rider leaves the route. Routes outside pack coverage are rejected explicitly.
+route-only bundle (`map_size = 0`); the ESP32 validates every point against the
+offline Amsterdam BTIL city archive, draws it over those streets, and refreshes
+the 3×3 working tile window around the actual GPS position. Roads therefore
+remain visible after the rider leaves the route. Routes outside BTIL coverage
+are rejected explicitly.
 
 After the transfer commit is acknowledged, the ESP32 status stream is the
 source of truth for the active route, position, maneuvers, remaining distance,
