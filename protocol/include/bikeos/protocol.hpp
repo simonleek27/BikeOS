@@ -46,6 +46,7 @@ enum class MessageType : std::uint8_t {
     restart_navigation = 14,
     stop_navigation = 15,
     trigger_off_route = 16,
+    restore_navigation = 17,
 };
 
 enum class ResultCode : std::uint8_t {
@@ -123,6 +124,12 @@ struct Acknowledgement {
     std::uint32_t bundle_id{};
 };
 
+struct NavigationRestore {
+    std::uint32_t route_id{};
+    std::uint32_t progress_cm{};
+    RunState run_state{RunState::paused};
+};
+
 struct BleFragmentHeader {
     std::uint16_t message_id{};
     std::uint16_t total_size{};
@@ -182,6 +189,8 @@ std::vector<std::uint8_t> encode_transfer_chunk(std::uint32_t offset, std::span<
 bool decode_transfer_chunk(std::span<const std::uint8_t> payload, TransferChunk& output);
 std::vector<std::uint8_t> encode_acknowledgement(const Acknowledgement& acknowledgement);
 bool decode_acknowledgement(std::span<const std::uint8_t> payload, Acknowledgement& output);
+std::vector<std::uint8_t> encode_navigation_restore(const NavigationRestore& restore);
+bool decode_navigation_restore(std::span<const std::uint8_t> payload, NavigationRestore& output);
 std::vector<std::uint8_t> encode_status(const Status& status);
 bool decode_status(std::span<const std::uint8_t> payload, Status& output);
 

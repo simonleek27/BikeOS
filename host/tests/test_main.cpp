@@ -406,6 +406,13 @@ void test_ble_protocol()
     CHECK(decode_status(paused_payload, paused_status));
     CHECK(paused_status.run_state == RunState::paused);
 
+    const NavigationRestore restore{.route_id = 42, .progress_cm = 12345, .run_state = RunState::paused};
+    NavigationRestore decoded_restore;
+    CHECK(decode_navigation_restore(encode_navigation_restore(restore), decoded_restore));
+    CHECK(decoded_restore.route_id == 42 && decoded_restore.progress_cm == 12345 &&
+          decoded_restore.run_state == RunState::paused);
+    CHECK(!decode_navigation_restore(std::vector<std::uint8_t>{1, 2, 3}, decoded_restore));
+
     const auto command = encode_frame(
         {.type = MessageType::trigger_off_route, .transfer_id = 0, .sequence = 8, .flags = 0}, {});
     CHECK(decode_frame(command, decoded));

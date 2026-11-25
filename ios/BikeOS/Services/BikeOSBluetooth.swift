@@ -62,6 +62,27 @@ enum BikeOSBLEFragment {
     }
 }
 
+private struct BikeOSRideCheckpoint: Codable {
+    let routeID: UInt32
+    let routeData: Data
+    let routeName: String
+    let routeSource: String
+    var progressM: Double
+    var latitude: Double
+    var longitude: Double
+    var headingDeg: Double?
+    var runStateRaw: UInt8
+    var updatedAt: Date
+
+    var coordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+
+    var restoredRunState: BikeOSRunState {
+        BikeOSRunState(rawValue: runStateRaw) ?? .paused
+    }
+}
+
 @MainActor final class BikeOSBluetooth: NSObject, ObservableObject {
     @Published private(set) var connectionState: BikeOSConnectionState = .disconnected
     @Published private(set) var status: BikeOSStatus?
@@ -74,6 +95,7 @@ enum BikeOSBLEFragment {
     @Published private(set) var pendingNavigationCommand: BikeOSMessageType?
     @Published private(set) var activeRouteID: UInt32?
     @Published private(set) var transferringRouteID: UInt32?
+    @Published private(set) var restoredRoute: BikeOSRoutePlan?
 
     private enum TransferPhase { case idle, waitingForBeginAck, sending, verifying, activated, failed }
     private var phase: TransferPhase = .idle
@@ -108,9 +130,26 @@ enum BikeOSBLEFragment {
     }
     private var writeQueue: [PendingWrite] = []
     private var responseWriteInFlight = false
+    private let checkpointKey = "BikeOS.activeRideCheckpoint"
+    private var checkpoint: BikeOSRideCheckpoint?
+    private var activeRoutePlan: BikeOSRoutePlan?
+    private var pendingRestore: BikeOSRideCheckpoint?
+    private var restoreAttemptedForConnection = false
+    private var lastCheckpointWrite = Date.distantPast
 
     override init() {
         super.init()
+        if let data = UserDefaults.standard.data(forKey: checkpointKey),
+           let saved = try? JSONDecoder().decode(BikeOSRideCheckpoint.self, from: data),
+           let route = try? BikeOSRouteDecoder.decode(saved.routeData,
+                                                     name: saved.routeName,
+                                                     source: saved.routeSource) {
+            checkpoint = saved
+            activeRoutePlan = route
+            restoredRoute = route
+            liveCoordinate = saved.coordinate
+            liveHeading = saved.headingDeg
+        }
         central = CBCentralManager(delegate: self, queue: nil,
                                    options: [CBCentralManagerOptionRestoreIdentifierKey: "BikeOS.Bluetooth"])
     }
@@ -124,6 +163,8 @@ enum BikeOSBLEFragment {
     func routeIsActive(_ route: BikeOSRoutePlan) -> Bool {
         activeRouteID == route.routeID || status?.routeID == route.routeID
     }
+
+    var hasSavedRide: Bool { checkpoint != nil }
 
     func connect() {
         connectionRequested = true
@@ -224,7 +265,11 @@ enum BikeOSBLEFragment {
     private func beginTransfer(route decodedRoute: BikeOSRoutePlan,
                                map: Data,
                                routeBytes route: Data,
-                               displayName: String) {
+                               displayName: String,
+                               preserveCheckpoint: Bool = false) {
+        activeRoutePlan = decodedRoute
+        restoredRoute = decodedRoute
+        saveRouteCheckpoint(decodedRoute, routeBytes: route, preserveProgress: preserveCheckpoint)
         bundleID = UInt32(Date().timeIntervalSince1970) ^ 0xB1CE_0005
         routeID = decodedRoute.routeID
         activeRouteID = nil
@@ -260,6 +305,103 @@ enum BikeOSBLEFragment {
     func restartNavigation() { sendDemoCommand(.restartNavigation, label: "Restarting navigation") }
     func stopNavigation() { sendDemoCommand(.stopNavigation, label: "Stopping navigation") }
     func triggerOffRoute() { sendDemoCommand(.triggerOffRoute, label: "Off-route test requested") }
+
+    private func sendRestoreNavigation(_ saved: BikeOSRideCheckpoint) {
+        guard isReadyForTransfer, let activeRoutePlan,
+              activeRoutePlan.routeID == saved.routeID else { return }
+        let progressCm = UInt32(max(0, min(Double(UInt32.max) / 100.0, saved.progressM)) * 100.0)
+        var payload = Data()
+        payload.appendLE(saved.routeID)
+        payload.appendLE(progressCm)
+        // A reboot always restores paused. This prevents the simulator or a
+        // later real-GPS session from moving while the rider is not ready.
+        payload.append(BikeOSRunState.paused.rawValue)
+        pendingNavigationCommand = .restoreNavigation
+        let sequence = sendControl(type: .restoreNavigation,
+                                   payload: payload,
+                                   label: "Restoring saved ride")
+        if sequence != 0 {
+            lastAck = "Restoring your saved position…"
+            commandTimeoutTask?.cancel()
+            commandTimeoutTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard !Task.isCancelled, let self,
+                      self.pendingNavigationCommand == .restoreNavigation else { return }
+                self.pendingNavigationCommand = nil
+                self.pendingCommands.removeValue(forKey: sequence)
+                self.lastAck = "ESP32 did not confirm the saved position — try reconnecting"
+            }
+        } else {
+            pendingNavigationCommand = nil
+        }
+    }
+
+    private func saveRouteCheckpoint(_ route: BikeOSRoutePlan, routeBytes: Data, preserveProgress: Bool) {
+        let coordinate = preserveProgress && checkpoint?.routeID == route.routeID
+            ? checkpoint!.coordinate
+            : (route.points.first ?? CLLocationCoordinate2D())
+        let saved = BikeOSRideCheckpoint(routeID: route.routeID,
+                                         routeData: routeBytes,
+                                         routeName: route.name,
+                                         routeSource: route.source,
+                                         progressM: preserveProgress && checkpoint?.routeID == route.routeID ? checkpoint!.progressM : 0,
+                                         latitude: coordinate.latitude,
+                                         longitude: coordinate.longitude,
+                                         headingDeg: preserveProgress && checkpoint?.routeID == route.routeID ? checkpoint!.headingDeg : nil,
+                                         runStateRaw: BikeOSRunState.notStarted.rawValue,
+                                         updatedAt: Date())
+        checkpoint = saved
+        persistCheckpoint(saved)
+    }
+
+    private func persistCheckpoint(_ saved: BikeOSRideCheckpoint) {
+        guard let data = try? JSONEncoder().encode(saved) else { return }
+        UserDefaults.standard.set(data, forKey: checkpointKey)
+    }
+
+    private func maybeRestore(_ newStatus: BikeOSStatus) {
+        guard !restoreAttemptedForConnection, pendingNavigationCommand == nil,
+              let saved = checkpoint, saved.progressM > 5 else { return }
+        restoreAttemptedForConnection = true
+        if newStatus.routeID != saved.routeID {
+            guard let route = try? BikeOSRouteDecoder.decode(saved.routeData,
+                                                             name: saved.routeName,
+                                                             source: saved.routeSource) else {
+                lastAck = "Saved ride could not be decoded — send the route again"
+                return
+            }
+            activeRoutePlan = route
+            restoredRoute = route
+            pendingRestore = saved
+            beginTransfer(route: route,
+                          map: Data(),
+                          routeBytes: saved.routeData,
+                          displayName: "saved ride",
+                          preserveCheckpoint: true)
+        } else if newStatus.runState == .notStarted || newStatus.runState == .stopped {
+            activeRoutePlan = activeRoutePlan ?? restoredRoute
+            sendRestoreNavigation(saved)
+        }
+    }
+
+    private func updateCheckpoint(for newStatus: BikeOSStatus) {
+        guard var saved = checkpoint, saved.routeID == newStatus.routeID,
+              let route = activeRoutePlan ?? restoredRoute else { return }
+        let progress = max(0, min(route.distanceM, route.distanceM - Double(newStatus.remainingM)))
+        saved.progressM = progress
+        if newStatus.gpsValid {
+            saved.latitude = newStatus.coordinate.latitude
+            saved.longitude = newStatus.coordinate.longitude
+        }
+        saved.headingDeg = newStatus.headingDeg
+        saved.runStateRaw = newStatus.runState.rawValue
+        saved.updatedAt = Date()
+        checkpoint = saved
+        if Date().timeIntervalSince(lastCheckpointWrite) >= 0.5 || newStatus.runState != .running {
+            lastCheckpointWrite = Date()
+            persistCheckpoint(saved)
+        }
+    }
 
     private func sendDemoCommand(_ type: BikeOSMessageType, label: String) {
         guard isReadyForTransfer else {
@@ -520,12 +662,17 @@ enum BikeOSBLEFragment {
     private func ingestStatus(_ newStatus: BikeOSStatus) {
         status = newStatus
         liveHeading = newStatus.headingDeg
+        maybeRestore(newStatus)
+        updateCheckpoint(for: newStatus)
         guard newStatus.gpsValid else { return }
 
         let target = newStatus.coordinate
         if newStatus.runState != .running {
             interpolationTask?.cancel()
-            if liveCoordinate == nil { liveCoordinate = target }
+            // A reboot, pause, or restore is an authoritative position update.
+            // Never keep showing the pre-reboot marker while the ESP32 reports
+            // its current checkpoint.
+            liveCoordinate = target
             return
         }
         let start = liveCoordinate ?? target
@@ -595,6 +742,7 @@ extension BikeOSBluetooth: CBCentralManagerDelegate {
             self.data = nil
             self.ackNotifyReady = false
             self.statusNotifyReady = false
+            self.restoreAttemptedForConnection = false
             self.reconnectAttempt = 0
             self.reconnectTask?.cancel()
             self.connectionState = .connected
@@ -712,6 +860,10 @@ extension BikeOSBluetooth: CBPeripheralDelegate {
                     activeRouteID = routeID
                     transferringRouteID = nil
                     lastAck = "Activated route \(routeID) on ESP32"
+                    if let saved = pendingRestore {
+                        pendingRestore = nil
+                        sendRestoreNavigation(saved)
+                    }
                 }
             }
         }

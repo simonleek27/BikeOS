@@ -1,5 +1,12 @@
 # BikeOS iPhone app
 
+The app stores the active route and latest ESP32 checkpoint locally on the
+iPhone. After an ESP32 power cycle, reconnect and wait for **Ready**; BikeOS
+restores the route and position paused, then **Resume** continues from that
+offset. **Restart from beginning** intentionally resets to the start. The
+navigation arrow uses ESP32 heading when available, with iPhone GPS/compass and
+route bearing as fallbacks.
+
 Open `BikeOS.xcodeproj` in Xcode 26. The app runs in the simulator with the Amsterdam demo planner and uses CoreBluetooth on a real iPhone. On a real phone, leave the ESP32 connected to USB, tap **Connect**, select the advertised `BikeOS` peripheral, then tap **Send to BikeOS**. Once the app reports the matching route ID as activated, open navigation and use **Start**, **Pause**, **Resume**, **Restart**, and **End ride** to control the indoor simulator. The map follows the authoritative ESP32 status stream; it is not using the phone's location for ride progress.
 
 ## Create a route

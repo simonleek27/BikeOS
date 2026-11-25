@@ -6,7 +6,7 @@ enum BikeOSMessageType: UInt8 {
     case transferCancel = 5, startNavigation = 6, cancelNavigation = 7
     case acknowledgement = 8, error = 9, status = 10, rerouteRequest = 11
     case pauseNavigation = 12, resumeNavigation = 13, restartNavigation = 14
-    case stopNavigation = 15, triggerOffRoute = 16
+    case stopNavigation = 15, triggerOffRoute = 16, restoreNavigation = 17
 }
 
 enum BikeOSResultCode: UInt8 { case ok = 0, accepted = 1, invalidFrame = 2, unsupportedVersion = 3, busy = 4, invalidTransfer = 5, invalidOffset = 6, crcMismatch = 7, invalidBundle = 8, cancelled = 9, unauthorized = 10 }
@@ -76,6 +76,11 @@ struct BikeOSStatus {
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: Double(latitudeE7) * 1e-7,
                                longitude: Double(longitudeE7) * 1e-7)
+    }
+
+    var headingIsUsable: Bool {
+        guard let speedMPS else { return headingDeg != nil }
+        return headingDeg != nil && speedMPS >= 0.5
     }
 
     static func decode(_ frame: BikeOSFrame) -> BikeOSStatus? {

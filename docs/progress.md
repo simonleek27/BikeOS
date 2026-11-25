@@ -17,7 +17,9 @@ Updated: 25 November 2026
 | TFT wiring | Verified for current module | CS 10, RESET 4, DC 5, MOSI 11, SCK 12; power safety remains documented |
 | BLE route transfer | Implemented and tested | ACK-paced transfer, 20/23/244/247-byte ATT fragmentation, strict reassembly, BRTE v1/v2 route-only bundles, transfer diagnostics, and activated-route verification |
 | iPhone app | Navigation/planner redesign implemented | Compact map-first navigation layout, authoritative run-state controls, robust hit targets, real destination search, GraphHopper bicycle routing, route preview, custom BRTE upload, and active-route gating |
-| Indoor simulator controls | Complete | Deterministic 4.5 m/s simulator starts only after Start, pauses at the exact position with speed 0, resumes, restarts, stops, and reports run state over BLE |
+| Indoor simulator controls | Complete | Deterministic 4.5 m/s simulator starts only after Start, pauses at the exact position with speed 0, resumes, restarts, stops, reports run state over BLE, and restores a saved offset paused after reboot |
+| Ride checkpoint recovery | Implemented and built | iPhone persists route/progress/coordinate; after reconnect it re-sends the saved route if needed and restores the ESP32 at the saved offset without auto-starting |
+| iPhone heading/HUD | Implemented and simulator-built | ESP32 heading → iPhone course/compass → route bearing fallback; fixed 44-point controls and telemetry-stable HUD |
 
 ## Current assessment
 
@@ -42,15 +44,16 @@ rider position, including while off-route.
 The iPhone also has automatic reconnect and CoreBluetooth state restoration;
 physical cycling reliability still needs to be exercised.
 
-Firmware 0.5.0 was rebuilt and successfully flashed to the physical board before
-the integration branch. The combined firmware and 12 MB city-map partition build
-successfully, but have not yet been flashed to hardware. The physical panel still
-needs direct visual confirmation after the combined flash.
+Firmware 0.5.0 and the 12 MB city-map partition were flashed to the physical
+board on 25 November 2026; the boot log reported `City map: 1115 tiles`,
+`OSM map ready (city tiles)`, and `ILI9341 initialized`. The checkpoint/heading
+changes are built and ready for the next physical flash and reboot-resume test.
 
 ## Next priorities
 
-1. Flash the combined app/partition, then flash `data/amsterdam.btil` with
-   `idf.py map-flash`; capture the `City map: 1115 tiles` boot log.
+1. Flash the checkpoint/heading firmware and repeat the power-cycle recovery:
+   confirm the saved route returns paused at the saved offset and **Resume**
+   continues from there.
 2. Repeat custom-route transfer on the physical board and capture commit ACK +
    activated route status in the serial log.
 3. Run the physical Start/Pause/Resume/Stop/Restart and BT disconnect/reconnect

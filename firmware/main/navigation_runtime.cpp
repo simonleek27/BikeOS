@@ -536,7 +536,8 @@ protocol::ResultCode NavigationRuntime::install_bundle(const std::uint32_t bundl
     return protocol::ResultCode::ok;
 }
 
-protocol::ResultCode NavigationRuntime::handle_navigation_command(const protocol::MessageType command)
+protocol::ResultCode NavigationRuntime::handle_navigation_command(const protocol::MessageType command,
+                                                                  const std::span<const std::uint8_t> payload)
 {
     if (!state_) return protocol::ResultCode::invalid_bundle;
     std::scoped_lock lock(state_->mutex);
@@ -588,6 +589,51 @@ protocol::ResultCode NavigationRuntime::handle_navigation_command(const protocol
             state_->have_latest = true;
 #endif
             return protocol::ResultCode::ok;
+        case protocol::MessageType::restore_navigation: {
+            protocol::NavigationRestore restore{};
+            if (!protocol::decode_navigation_restore(payload, restore) ||
+                restore.route_id != state_->route.route_id) {
+                return protocol::ResultCode::invalid_bundle;
+            }
+            if (!state_->simulator.set_route(state_->route)) return protocol::ResultCode::invalid_bundle;
+            state_->simulator.set_speed_mps(kDemoSpeedMps);
+            state_->simulator.set_events({
+                {state_->route.total_distance_m * 0.42F, state_->route.total_distance_m * 0.50F,
+                 SimulationEventType::off_route, 50.0F},
+                {state_->route.total_distance_m * 0.68F, state_->route.total_distance_m * 0.73F,
+                 SimulationEventType::gps_loss, 0.0F},
+            });
+            state_->simulator.set_progress_m(static_cast<float>(restore.progress_cm) / 100.0F);
+            state_->filter.reset();
+            if (!state_->navigation.set_route(state_->route)) return protocol::ResultCode::invalid_bundle;
+            // Take one zero-duration simulator sample at the saved offset so
+            // the navigation snapshot, maneuver, map tiles, and TFT marker all
+            // agree before the user resumes riding.
+            state_->navigation.set_run_state(NavigationRunState::running);
+            const auto now = uptime_ms();
+            if (const auto fix = state_->simulator.step(now, 0.0F)) {
+                state_->navigation.update(fix, state_->phone_connected, now);
+            }
+            const auto requested = static_cast<NavigationRunState>(restore.run_state);
+            if (requested == NavigationRunState::running) {
+                // A power-cycle must never start the simulator unattended.
+                state_->navigation.set_run_state(NavigationRunState::paused);
+                state_->simulation_paused = true;
+            } else {
+                state_->navigation.set_run_state(requested);
+                state_->simulation_paused = requested != NavigationRunState::running;
+            }
+            state_->update_tiles(state_->navigation.snapshot().matched_position);
+            state_->reroute_pending = false;
+#if CONFIG_BIKEOS_DISPLAY_ILI9341 && !CONFIG_BIKEOS_DISPLAY_TEST_PATTERN
+            state_->latest = state_->navigation.snapshot();
+            state_->have_latest = true;
+#endif
+            ESP_LOGI(kTag, "Restored route=%" PRIu32 " progress=%.1fm state=%u",
+                     restore.route_id, static_cast<double>(restore.progress_cm) / 100.0,
+                     static_cast<unsigned>(state_->navigation.snapshot().run_state));
+            return protocol::ResultCode::ok;
+        }
         case protocol::MessageType::trigger_off_route: {
             if (state_->route.route_id == 0) return protocol::ResultCode::invalid_bundle;
             const float start = state_->simulator.progress_m() + 1.0F;

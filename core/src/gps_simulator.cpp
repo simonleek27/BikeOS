@@ -25,6 +25,10 @@ bool GpsSimulator::set_route(const Route& route)
 
 void GpsSimulator::set_speed_mps(const float speed_mps) { speed_mps_ = std::clamp(speed_mps, 0.0F, 20.0F); }
 void GpsSimulator::set_events(std::vector<SimulationEvent> events) { events_ = std::move(events); }
+void GpsSimulator::set_progress_m(const float progress_m)
+{
+    progress_m_ = route_ == nullptr ? 0.0F : std::clamp(progress_m, 0.0F, route_->total_distance_m);
+}
 void GpsSimulator::reset() { progress_m_ = 0.0F; }
 float GpsSimulator::progress_m() const { return progress_m_; }
 bool GpsSimulator::finished() const { return route_ && progress_m_ >= route_->total_distance_m; }

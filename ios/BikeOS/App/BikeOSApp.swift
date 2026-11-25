@@ -8,22 +8,35 @@ import SwiftUI
 
 @MainActor final class BikeOSLocationProvider: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published private(set) var location: CLLocation?
+    @Published private(set) var course: CLLocationDirection?
+    @Published private(set) var heading: CLLocationDirection?
     private let manager = CLLocationManager()
 
     override init() {
         super.init()
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBest
+        manager.headingFilter = 5
     }
 
     func start() {
         manager.requestWhenInUseAuthorization()
         manager.startUpdatingLocation()
+        if CLLocationManager.headingAvailable() { manager.startUpdatingHeading() }
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
-        Task { @MainActor in self.location = location }
+        Task { @MainActor in
+            self.location = location
+            if location.course >= 0, location.speed >= 0.8 { self.course = location.course }
+        }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
+        let value = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
+        guard value >= 0 else { return }
+        Task { @MainActor in self.heading = value }
     }
 }
 
@@ -60,9 +73,15 @@ struct BikeOSHomeView: View {
             .navigationTitle("BikeOS")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(isPresented: $showingNavigation) {
-                if let route { ActiveNavigationView(route: route, bluetooth: bluetooth) }
+                if let route { ActiveNavigationView(route: route, bluetooth: bluetooth, location: location) }
             }
-            .task { location.start() }
+            .task {
+                if route == nil { route = bluetooth.restoredRoute }
+                location.start()
+            }
+            .onChange(of: bluetooth.restoredRoute?.routeID) { _, _ in
+                if route == nil { route = bluetooth.restoredRoute }
+            }
         }
     }
 
@@ -327,13 +346,17 @@ private struct ActiveNavigationView: View {
     @Environment(\.dismiss) private var dismiss
     let route: BikeOSRoutePlan
     @ObservedObject var bluetooth: BikeOSBluetooth
+    @ObservedObject var location: BikeOSLocationProvider
     @State private var cameraPosition: MapCameraPosition
     @State private var followsRider = true
     @State private var headingUp = false
     @State private var suppressCameraChange = false
 
-    init(route: BikeOSRoutePlan, bluetooth: BikeOSBluetooth) {
-        self.route = route; self.bluetooth = bluetooth; _cameraPosition = State(initialValue: .region(route.region))
+    init(route: BikeOSRoutePlan, bluetooth: BikeOSBluetooth, location: BikeOSLocationProvider) {
+        self.route = route
+        self.bluetooth = bluetooth
+        self.location = location
+        _cameraPosition = State(initialValue: .region(route.region))
     }
 
     private var matchedIndex: Int { Int(bluetooth.status?.matchedPointIndex ?? 0) }
@@ -342,6 +365,13 @@ private struct ActiveNavigationView: View {
     private var runState: BikeOSRunState { bluetooth.status?.runState ?? .notStarted }
     private var primaryTitle: String { switch runState { case .running: "Pause"; case .paused: "Resume"; case .arrived: "Restart"; case .notStarted, .stopped: "Start" } }
     private var primarySymbol: String { runState == .running ? "pause.fill" : "play.fill" }
+    private var displayHeading: CLLocationDirection? {
+        if let heading = bluetooth.liveHeading,
+           (bluetooth.status?.headingIsUsable == true || bluetooth.status?.gps == .simulated) {
+            return heading
+        }
+        return location.course ?? location.heading ?? bluetooth.liveHeading ?? route.bearing(at: matchedIndex)
+    }
 
     var body: some View {
         Map(position: $cameraPosition, interactionModes: [.pan, .zoom, .rotate]) {
@@ -351,7 +381,11 @@ private struct ActiveNavigationView: View {
             if let coordinate = bluetooth.liveCoordinate {
                 Annotation("You", coordinate: coordinate, anchor: .center) {
                     Image(systemName: "location.north.fill").font(.title3).foregroundStyle(.orange)
-                        .rotationEffect(.degrees(bluetooth.liveHeading ?? 0)).padding(7).background(.white)
+                        // Map annotations are screen-oriented. Subtract the
+                        // camera heading so the arrow stays aligned in
+                        // heading-up mode instead of rotating twice.
+                        .rotationEffect(.degrees((displayHeading ?? 0) - (headingUp ? (displayHeading ?? 0) : 0)))
+                        .padding(7).background(.white)
                         .clipShape(Circle()).shadow(radius: 3)
                 }
             }
@@ -361,6 +395,8 @@ private struct ActiveNavigationView: View {
         .onMapCameraChange(frequency: .onEnd) { _ in if !suppressCameraChange { followsRider = false } }
         .onChange(of: bluetooth.liveCoordinate?.latitude) { _, _ in followRiderIfNeeded() }
         .onChange(of: bluetooth.liveHeading) { _, _ in followRiderIfNeeded() }
+        .onChange(of: location.course) { _, _ in followRiderIfNeeded() }
+        .onChange(of: location.heading) { _, _ in followRiderIfNeeded() }
         .navigationTitle(route.name).navigationBarTitleDisplayMode(.inline).onAppear { fitRoute() }
     }
 
@@ -370,14 +406,21 @@ private struct ActiveNavigationView: View {
                 .font(.caption.weight(.semibold)).lineLimit(1).fixedSize(horizontal: true, vertical: false)
                 .padding(.horizontal, 9).padding(.vertical, 7).background(.orange, in: Capsule()).foregroundStyle(.white)
             Text(bluetooth.status?.runState.label ?? "Ready").font(.caption.weight(.semibold)).lineLimit(1)
+                .frame(minWidth: 66, alignment: .center)
                 .padding(.horizontal, 9).padding(.vertical, 7).background(.regularMaterial, in: Capsule())
             Spacer(minLength: 0)
             Circle().fill(bluetooth.connectionState == .readyForTransfer || bluetooth.connectionState == .connected ? .green : .orange)
                 .frame(width: 10, height: 10).accessibilityLabel("Bluetooth \(bluetooth.connectionState.label)")
-            Button { recenter() } label: { Image(systemName: "location.fill").frame(width: 44, height: 44) }
+            Button { recenter() } label: {
+                Image(systemName: "location.fill")
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
                 .buttonStyle(.borderedProminent).accessibilityLabel("Recenter on rider")
         }
-        .padding(.horizontal, 12).padding(.vertical, 6).background(.regularMaterial)
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .center)
+        .padding(.horizontal, 12).background(.regularMaterial)
+        .transaction { transaction in transaction.animation = nil }
     }
 
     private var navigationCard: some View {
@@ -406,7 +449,11 @@ private struct ActiveNavigationView: View {
                     Button("Heading-up map", systemImage: "location.north") { headingUp.toggle(); recenter() }
                     Divider()
                     Button("End ride", systemImage: "stop.fill", role: .destructive) { bluetooth.stopNavigation(); dismiss() }
-                } label: { Image(systemName: "ellipsis").frame(width: 46, height: 46) }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .frame(width: 46, height: 46)
+                        .contentShape(Rectangle())
+                }
                     .buttonStyle(.bordered).contentShape(Rectangle())
             }
             if bluetooth.pendingNavigationCommand != nil { ProgressView("Waiting for ESP32…").font(.caption) }
@@ -418,6 +465,7 @@ private struct ActiveNavigationView: View {
         }
         .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 10).background(.regularMaterial)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .transaction { transaction in transaction.animation = nil }
     }
 
     private func metric(_ title: String, _ value: String) -> some View {
@@ -429,7 +477,10 @@ private struct ActiveNavigationView: View {
     private func followRiderIfNeeded() {
         guard followsRider, let coordinate = bluetooth.liveCoordinate else { return }
         suppressCameraChange = true
-        cameraPosition = .camera(MapCamera(centerCoordinate: coordinate, distance: 850, heading: headingUp ? (bluetooth.liveHeading ?? 0) : 0, pitch: 0))
+        cameraPosition = .camera(MapCamera(centerCoordinate: coordinate,
+                                           distance: 850,
+                                           heading: headingUp ? (displayHeading ?? 0) : 0,
+                                           pitch: 0))
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { suppressCameraChange = false }
     }
 }
@@ -439,6 +490,19 @@ private extension BikeOSRoutePlan {
         guard !points.isEmpty else { return MKCoordinateRegion() }
         let lats = points.map(\.latitude), lons = points.map(\.longitude)
         return MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: (lats.min()! + lats.max()!) / 2, longitude: (lons.min()! + lons.max()!) / 2), span: MKCoordinateSpan(latitudeDelta: max(0.005, (lats.max()! - lats.min()!) * 1.35), longitudeDelta: max(0.005, (lons.max()! - lons.min()!) * 1.35)))
+    }
+
+    func bearing(at index: Int) -> CLLocationDirection? {
+        guard points.count >= 2 else { return nil }
+        let start = points[min(max(0, index), points.count - 2)]
+        let end = points[min(max(1, index + 1), points.count - 1)]
+        let lat1 = start.latitude * .pi / 180
+        let lat2 = end.latitude * .pi / 180
+        let deltaLon = (end.longitude - start.longitude) * .pi / 180
+        let y = sin(deltaLon) * cos(lat2)
+        let x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(deltaLon)
+        let bearing = atan2(y, x) * 180 / .pi
+        return bearing >= 0 ? bearing : bearing + 360
     }
 }
 

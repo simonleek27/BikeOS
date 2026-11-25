@@ -16,7 +16,8 @@ public:
                                                              std::span<const std::uint8_t>,
                                                              std::span<const std::uint8_t>)>;
     using ConnectionHandler = std::function<void(bool)>;
-    using CommandHandler = std::function<protocol::ResultCode(protocol::MessageType)>;
+    using CommandHandler = std::function<protocol::ResultCode(protocol::MessageType,
+                                                               std::span<const std::uint8_t>)>;
 
     bool initialize(StatusProvider status_provider,
                     BundleHandler bundle_handler,
@@ -29,7 +30,8 @@ public:
                                        const protocol::TransferBegin& begin,
                                        std::span<const std::uint8_t> map_bytes,
                                        std::span<const std::uint8_t> route_bytes) const;
-    protocol::ResultCode handle_navigation_command(protocol::MessageType command) const;
+    protocol::ResultCode handle_navigation_command(protocol::MessageType command,
+                                                   std::span<const std::uint8_t> payload = {}) const;
     void connection_changed(bool connected);
 
 private:

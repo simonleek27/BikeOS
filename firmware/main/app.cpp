@@ -47,8 +47,9 @@ std::uint64_t monotonic_ms()
                             return navigation.install_bundle(bundle_id, begin, map_bytes, route_bytes);
                         },
                         [&navigation](const bool connected) { navigation.set_phone_connected(connected); },
-                        [&navigation](const protocol::MessageType command) {
-                            return navigation.handle_navigation_command(command);
+                        [&navigation](const protocol::MessageType command,
+                                      const std::span<const std::uint8_t> payload) {
+                            return navigation.handle_navigation_command(command, payload);
                         })) {
         ESP_LOGE(kTag, "BLE peripheral initialization failed; continuing without phone transport");
     }

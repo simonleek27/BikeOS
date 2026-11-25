@@ -36,7 +36,7 @@ bool read_le(std::span<const std::uint8_t> input, std::size_t& offset, T& value)
 bool valid_type(const std::uint8_t value)
 {
     return value >= static_cast<std::uint8_t>(MessageType::status_request) &&
-           value <= static_cast<std::uint8_t>(MessageType::trigger_off_route);
+           value <= static_cast<std::uint8_t>(MessageType::restore_navigation);
 }
 
 }  // namespace
@@ -221,6 +221,34 @@ std::vector<std::uint8_t> encode_acknowledgement(const Acknowledgement& acknowle
     append_le(output, acknowledgement.next_offset);
     append_le(output, acknowledgement.bundle_id);
     return output;
+}
+
+std::vector<std::uint8_t> encode_navigation_restore(const NavigationRestore& restore)
+{
+    if (restore.route_id == 0 || static_cast<std::uint8_t>(restore.run_state) >
+                                     static_cast<std::uint8_t>(RunState::arrived)) {
+        return {};
+    }
+    std::vector<std::uint8_t> output;
+    output.reserve(9);
+    append_le(output, restore.route_id);
+    append_le(output, restore.progress_cm);
+    append_le(output, static_cast<std::uint8_t>(restore.run_state));
+    return output;
+}
+
+bool decode_navigation_restore(const std::span<const std::uint8_t> payload, NavigationRestore& output)
+{
+    if (payload.size() != 9) return false;
+    std::size_t offset = 0;
+    std::uint8_t run_state = 0;
+    if (!read_le(payload, offset, output.route_id) || !read_le(payload, offset, output.progress_cm) ||
+        !read_le(payload, offset, run_state) || output.route_id == 0 ||
+        run_state > static_cast<std::uint8_t>(RunState::arrived)) {
+        return false;
+    }
+    output.run_state = static_cast<RunState>(run_state);
+    return true;
 }
 
 bool decode_acknowledgement(const std::span<const std::uint8_t> payload, Acknowledgement& output)

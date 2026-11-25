@@ -31,6 +31,20 @@ disconnect or Bluetooth power cycle. It re-discovers characteristics and waits
 for notifications before reporting `Ready`; interrupted transfers are failed
 and restarted from byte zero rather than resumed blindly.
 
+Ride checkpoints are stored locally on the iPhone (route BRTE, coordinate,
+progress, heading, and run state). After an ESP32 power cycle, the app
+automatically re-sends the saved route when necessary and sends a version-1
+`restore_navigation` command. The firmware restores the saved offset in a
+paused state, so the rider must explicitly tap **Resume**; it never starts
+moving unattended after a reboot. A deliberate **Restart from beginning** still
+means exactly that.
+
+The navigation marker heading uses ESP32 GPS heading when valid, then the
+iPhone's GPS course/compass, then the next route segment as a fallback. In
+heading-up mode the marker subtracts the map camera heading so it does not
+rotate twice. The top HUD and bottom controls use fixed hit regions and disable
+implicit animations while telemetry updates arrive.
+
 ## App
 
 Open `ios/BikeOS.xcodeproj`, choose the BikeOS scheme, and run on a real iPhone for CoreBluetooth. The home screen loads and validates `amsterdam_demo.brte`, draws the full route and maneuvers, and shows live ESP32 status. Tap **Connect**, then **Send demo route**. The app transfers the checked-in `amsterdam_demo.bmap` + `amsterdam_demo.brte` assets in protocol-sized chunks (up to 476-byte payloads); the BLE write layer fragments each frame to the negotiated ATT limit, paces each chunk from the ESP32 ACK, and only reports activation after the commit ACK and matching active route ID.

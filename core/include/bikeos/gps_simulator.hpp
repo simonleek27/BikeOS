@@ -32,6 +32,7 @@ public:
     bool set_route(const Route& route);
     void set_speed_mps(float speed_mps);
     void set_events(std::vector<SimulationEvent> events);
+    void set_progress_m(float progress_m);
     void reset();
     std::optional<GpsFix> step(std::uint64_t monotonic_timestamp_ms, float elapsed_seconds = 1.0F);
     float progress_m() const;
