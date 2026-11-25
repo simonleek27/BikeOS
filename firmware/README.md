@@ -152,3 +152,19 @@ The ILI9341 navigation target is enabled for the photo-verified GPIO map. The
 ST7565R option remains available only as a historical alternate target and
 should stay disabled unless that separate display is wired and verified.
 
+## Standalone real-GPS test
+
+The route can be loaded before going outside. After wiring the verified GPS
+module, choose `BikeOS hardware -> GPS source -> UART NMEA` in `idf.py menuconfig`
+and flash that build once. In UART mode a transferred route is armed in
+`NOT_STARTED`; press **Start** in the phone app, then take the ESP32/GPS near a
+window or outdoors. The firmware reports `WAITING_GPS` until a valid NMEA fix,
+then starts advancing from that fix. No Mac connection is needed after flashing:
+power the ESP32 from a USB power bank and connect the phone over BLE.
+
+For an Amsterdam route, the GPS must actually be near that route for map
+matching. A valid fix somewhere else is still visible as GPS telemetry, but it
+cannot advance an Amsterdam route and may be reported off-route/error. For the
+first field test, create a route near the GPS location or use the simulator
+build for an indoor end-to-end test.
+

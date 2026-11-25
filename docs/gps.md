@@ -46,3 +46,25 @@ GPIO18 at 9600 baud` confirms the UART came up.
 
 The NEO-6M does not support UBX NAV-PVT or 5 Hz with the same margin as the
 NEO-M8N assumed in `architecture.md`. Stay on NMEA at 1 Hz for now.
+
+## Indoor route loading, outdoor GPS start
+
+You can transfer and load a route indoors. In real-UART mode, installing a
+bundle deliberately leaves navigation in **Not started**; it does not begin
+moving just because a route was received. Press **Start** in the iPhone app
+while indoors (or after you go outside). The ESP32 then stays armed and shows
+`WAITING_GPS` until the first valid NMEA fix arrives. That first fix begins
+route progress automatically, so there is no second start action to repeat
+outside. If the fix is lost later, the route position is held and the display
+reports GPS loss until fixes return.
+
+The ESP32 does not need to remain connected to the Mac for this test. Connect
+the board to a USB power bank or wall charger after the one-time firmware flash;
+the iPhone talks to it over BLE. Keep the phone app connected while navigating
+so the phone and TFT continue receiving the ESP32's authoritative position and
+run state.
+
+For a real-GPS build, select `BikeOS hardware -> GPS source -> UART NMEA` in
+`idf.py menuconfig`, verify UART1 RX `18`, TX `17` (or unused), and baud `9600`,
+then build and flash once. The checked-in physical image remains the simulator
+until that configuration change is made intentionally.

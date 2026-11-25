@@ -11,7 +11,7 @@ Updated: 25 November 2026
 | Navigation engine | Complete for demo | Matching, maneuvers, off-route, reroute throttle, GPS loss, arrival |
 | Virtual color screen bench | Ready | Standalone macOS/browser bench uses the production ColorMapRenderer, supports route planning, fault toggles, ride controls, and RGB565 screenshots |
 | ESP navigation runtime | Complete for simulated source | Combined firmware builds; physical board still has the previous image until the new app + map partition are flashed |
-| UART GPS ingestion | Implemented, not physically tested | Needs verified GPS module and ESP RX/TX wiring |
+| UART GPS ingestion | Implemented, not physically tested | Needs verified GPS module and ESP RX/TX wiring; route can be armed indoors and starts on first valid fix |
 | ILI9341 TFT identification | Complete | 2.8-inch 240×320 SPI color module; color-bar test previously verified |
 | ILI9341 SPI driver | Complete | 320×240 landscape RGB565 driver initialized at 26 MHz on the physical board |
 | TFT wiring | Verified for current module | CS 10, RESET 4, DC 5, MOSI 11, SCK 12; power safety remains documented |
@@ -65,14 +65,16 @@ still need a physical firmware flash and iPhone run.
    activated route status in the serial log.
 4. Run the physical Start/Pause/Resume/Stop/Restart and BT disconnect/reconnect
    sequence on the ILI9341 and iPhone together.
-5. Connect and verify a physical GPS module, then replace deterministic GPS
-   simulation for field testing.
+5. Connect and verify a physical GPS module. Select the UART source, flash once,
+   load a route indoors, press Start, and take the ESP32 outdoors; it should
+   remain in WAITING_GPS until the first valid fix and then begin progress.
 
 Milestone 1—working firmware on the physical ESP32—is complete. Milestone 2a—
 physical iPhone↔ESP32 BLE discovery and connection—is complete. Milestone 2b—
 ILI9341 driver initialization and prior color-bar output—is complete; final
 visual confirmation after the combined flash remains pending. Physical GPS
-testing remains blocked on a verified GPS module and wiring.
+testing remains blocked on a verified GPS module and wiring. After that one-time
+flash, field tests can run from a USB power bank without the Mac attached.
 ## 2026-11-17 — BLE and iPhone milestone
 
 - Added shared version-1 BikeOS BLE framing, CRC32 validation, bundle transfer metadata, acknowledgements, status, and reroute events.

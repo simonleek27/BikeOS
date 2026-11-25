@@ -529,6 +529,11 @@ protocol::ResultCode NavigationRuntime::install_bundle(const std::uint32_t bundl
     });
     state_->simulation_paused = true;
     state_->navigation.set_run_state(NavigationRunState::not_started);
+#else
+    // Real GPS mode is armed but idle after transfer. The rider can load the
+    // route indoors, press Start before leaving, and the first valid outdoor
+    // fix will move the route from WAITING_GPS to NAVIGATING.
+    state_->navigation.set_run_state(NavigationRunState::not_started);
 #endif
 #if CONFIG_BIKEOS_DISPLAY_ILI9341 && !CONFIG_BIKEOS_DISPLAY_TEST_PATTERN
     state_->latest = state_->navigation.snapshot();
@@ -545,7 +550,6 @@ protocol::ResultCode NavigationRuntime::handle_navigation_command(const protocol
 {
     if (!state_) return protocol::ResultCode::invalid_bundle;
     std::scoped_lock lock(state_->mutex);
-#if CONFIG_BIKEOS_GPS_SIM
     switch (command) {
         case protocol::MessageType::start_navigation:
         case protocol::MessageType::resume_navigation:
@@ -553,11 +557,19 @@ protocol::ResultCode NavigationRuntime::handle_navigation_command(const protocol
             if (state_->navigation.snapshot().run_state == NavigationRunState::arrived) {
                 return protocol::ResultCode::invalid_bundle;
             }
+#if CONFIG_BIKEOS_GPS_SIM
             state_->simulation_paused = false;
+#endif
             state_->navigation.set_run_state(NavigationRunState::running);
+#if CONFIG_BIKEOS_DISPLAY_ILI9341 && !CONFIG_BIKEOS_DISPLAY_TEST_PATTERN
+            state_->latest = state_->navigation.snapshot();
+            state_->have_latest = true;
+#endif
             return protocol::ResultCode::ok;
         case protocol::MessageType::pause_navigation:
+#if CONFIG_BIKEOS_GPS_SIM
             state_->simulation_paused = true;
+#endif
             state_->navigation.set_run_state(NavigationRunState::paused);
 #if CONFIG_BIKEOS_DISPLAY_ILI9341 && !CONFIG_BIKEOS_DISPLAY_TEST_PATTERN
             state_->latest = state_->navigation.snapshot();
@@ -566,7 +578,9 @@ protocol::ResultCode NavigationRuntime::handle_navigation_command(const protocol
             return protocol::ResultCode::ok;
         case protocol::MessageType::stop_navigation:
         case protocol::MessageType::cancel_navigation:
+#if CONFIG_BIKEOS_GPS_SIM
             state_->simulation_paused = true;
+#endif
             state_->navigation.set_run_state(NavigationRunState::stopped);
 #if CONFIG_BIKEOS_DISPLAY_ILI9341 && !CONFIG_BIKEOS_DISPLAY_TEST_PATTERN
             state_->latest = state_->navigation.snapshot();
@@ -575,6 +589,7 @@ protocol::ResultCode NavigationRuntime::handle_navigation_command(const protocol
             return protocol::ResultCode::ok;
         case protocol::MessageType::restart_navigation:
             if (state_->route.route_id == 0) return protocol::ResultCode::invalid_bundle;
+#if CONFIG_BIKEOS_GPS_SIM
             state_->simulator.set_route(state_->route);
             state_->simulator.set_speed_mps(kDemoSpeedMps);
             state_->simulator.set_events({
@@ -583,9 +598,12 @@ protocol::ResultCode NavigationRuntime::handle_navigation_command(const protocol
                 {state_->route.total_distance_m * 0.68F, state_->route.total_distance_m * 0.73F,
                  SimulationEventType::gps_loss, 0.0F},
             });
+#endif
             state_->filter.reset();
             if (!state_->navigation.set_route(state_->route)) return protocol::ResultCode::invalid_bundle;
+#if CONFIG_BIKEOS_GPS_SIM
             state_->simulation_paused = false;
+#endif
             state_->navigation.set_run_state(NavigationRunState::running);
             state_->reroute_pending = false;
 #if CONFIG_BIKEOS_DISPLAY_ILI9341 && !CONFIG_BIKEOS_DISPLAY_TEST_PATTERN
@@ -593,6 +611,7 @@ protocol::ResultCode NavigationRuntime::handle_navigation_command(const protocol
             state_->have_latest = true;
 #endif
             return protocol::ResultCode::ok;
+#if CONFIG_BIKEOS_GPS_SIM
         case protocol::MessageType::restore_navigation: {
             protocol::NavigationRestore restore{};
             if (!protocol::decode_navigation_restore(payload, restore) ||
@@ -638,6 +657,7 @@ protocol::ResultCode NavigationRuntime::handle_navigation_command(const protocol
                      static_cast<unsigned>(state_->navigation.snapshot().run_state));
             return protocol::ResultCode::ok;
         }
+#endif
         case protocol::MessageType::set_route_eta: {
             protocol::RouteEta eta{};
             if (!protocol::decode_route_eta(payload, eta) || eta.route_id != state_->route.route_id) {
@@ -654,19 +674,19 @@ protocol::ResultCode NavigationRuntime::handle_navigation_command(const protocol
             return protocol::ResultCode::ok;
         }
         case protocol::MessageType::trigger_off_route: {
+#if CONFIG_BIKEOS_GPS_SIM
             if (state_->route.route_id == 0) return protocol::ResultCode::invalid_bundle;
             const float start = state_->simulator.progress_m() + 1.0F;
             const float end = std::min(state_->route.total_distance_m, start + 45.0F);
             state_->simulator.set_events({{start, end, SimulationEventType::off_route, 50.0F}});
             return protocol::ResultCode::ok;
+#else
+            return protocol::ResultCode::unauthorized;
+#endif
         }
         default:
             return protocol::ResultCode::invalid_frame;
     }
-#else
-    (void)command;
-    return protocol::ResultCode::unauthorized;
-#endif
 }
 
 }  // namespace bikeos
