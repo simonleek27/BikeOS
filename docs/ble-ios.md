@@ -45,6 +45,16 @@ heading-up mode the marker subtracts the map camera heading so it does not
 rotate twice. The top HUD and bottom controls use fixed hit regions and disable
 implicit animations while telemetry updates arrive.
 
+The phone sends a route-specific local arrival clock after activation and after
+checkpoint restore (`set_route_eta`, protocol message 18). The color TFT shows
+this as `Arrive HH:MM`; it does not derive arrival time from simulator GPS
+timestamps. When BLE is disconnected, the TFT clears the route view and shows
+`BikeOS` / `Waiting for connection`.
+
+On launch, the iPhone shows a compact BikeOS connect screen. Tap **Connect**;
+the planner and navigation screens appear after CoreBluetooth reaches Connected
+and remain available across later reconnects.
+
 ## App
 
 Open `ios/BikeOS.xcodeproj`, choose the BikeOS scheme, and run on a real iPhone for CoreBluetooth. The home screen loads and validates `amsterdam_demo.brte`, draws the full route and maneuvers, and shows live ESP32 status. Tap **Connect**, then **Send demo route**. The app transfers the checked-in `amsterdam_demo.bmap` + `amsterdam_demo.brte` assets in protocol-sized chunks (up to 476-byte payloads); the BLE write layer fragments each frame to the negotiated ATT limit, paces each chunk from the ESP32 ACK, and only reports activation after the commit ACK and matching active route ID.

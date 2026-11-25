@@ -413,6 +413,12 @@ void test_ble_protocol()
           decoded_restore.run_state == RunState::paused);
     CHECK(!decode_navigation_restore(std::vector<std::uint8_t>{1, 2, 3}, decoded_restore));
 
+    const RouteEta eta{.route_id = 42, .eta_minutes_local = 937};
+    RouteEta decoded_eta;
+    CHECK(decode_route_eta(encode_route_eta(eta), decoded_eta));
+    CHECK(decoded_eta.route_id == 42 && decoded_eta.eta_minutes_local == 937);
+    CHECK(encode_route_eta(RouteEta{.route_id = 42, .eta_minutes_local = 1440}).empty());
+
     const auto command = encode_frame(
         {.type = MessageType::trigger_off_route, .transfer_id = 0, .sequence = 8, .flags = 0}, {});
     CHECK(decode_frame(command, decoded));

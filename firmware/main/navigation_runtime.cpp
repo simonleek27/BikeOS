@@ -128,6 +128,7 @@ struct NavigationRuntime::State {
     std::uint32_t step_count{};
     bool simulation_paused{};
     bool phone_connected{};
+    std::int32_t eta_minutes_local{-1};
     bool reroute_pending{};
 
     const MapDataset& active_map() const { return use_tiles ? tile_window.map() : map; }
@@ -386,7 +387,9 @@ void NavigationRuntime::render_frame(const std::uint64_t frame_ms)
                                            static_cast<std::int64_t>(now_ms - state_->utc_epoch_received_ms);
     const std::int64_t render_start_us = esp_timer_get_time();
     state_->color_renderer.render(*state_->canvas, state_->active_map(), state_->route.points, state_->latest,
-                                  {.utc_epoch_ms = utc_now, .now_ms = frame_ms});
+                                  {.utc_epoch_ms = utc_now,
+                                   .eta_minutes_local = state_->eta_minutes_local,
+                                   .now_ms = frame_ms});
     const std::int64_t flush_start_us = esp_timer_get_time();
     if (!state_->ili9341_display->flush(*state_->canvas)) {
         ESP_LOGE(kTag, "ILI9341 color frame transfer failed");
@@ -532,6 +535,7 @@ protocol::ResultCode NavigationRuntime::install_bundle(const std::uint32_t bundl
     state_->have_latest = true;
 #endif
     state_->reroute_pending = false;
+    state_->eta_minutes_local = -1;
     ESP_LOGI(kTag, "Activated BLE bundle=%" PRIu32 " route=%" PRIu32, bundle_id, begin.route_id);
     return protocol::ResultCode::ok;
 }
@@ -632,6 +636,21 @@ protocol::ResultCode NavigationRuntime::handle_navigation_command(const protocol
             ESP_LOGI(kTag, "Restored route=%" PRIu32 " progress=%.1fm state=%u",
                      restore.route_id, static_cast<double>(restore.progress_cm) / 100.0,
                      static_cast<unsigned>(state_->navigation.snapshot().run_state));
+            return protocol::ResultCode::ok;
+        }
+        case protocol::MessageType::set_route_eta: {
+            protocol::RouteEta eta{};
+            if (!protocol::decode_route_eta(payload, eta) || eta.route_id != state_->route.route_id) {
+                return protocol::ResultCode::invalid_bundle;
+            }
+            state_->eta_minutes_local = eta.eta_minutes_local;
+#if CONFIG_BIKEOS_DISPLAY_ILI9341 && !CONFIG_BIKEOS_DISPLAY_TEST_PATTERN
+            state_->latest = state_->navigation.snapshot();
+            state_->have_latest = true;
+#endif
+            ESP_LOGI(kTag, "Phone ETA route=%" PRIu32 " %02u:%02u", eta.route_id,
+                     static_cast<unsigned>(eta.eta_minutes_local / 60),
+                     static_cast<unsigned>(eta.eta_minutes_local % 60));
             return protocol::ResultCode::ok;
         }
         case protocol::MessageType::trigger_off_route: {

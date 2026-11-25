@@ -162,7 +162,8 @@ int access_control(uint16_t, uint16_t, ble_gatt_access_ctxt* ctxt, void*)
                                        frame.header.type == protocol::MessageType::restart_navigation ||
                                        frame.header.type == protocol::MessageType::stop_navigation ||
                                        frame.header.type == protocol::MessageType::trigger_off_route ||
-                                       frame.header.type == protocol::MessageType::restore_navigation;
+                                       frame.header.type == protocol::MessageType::restore_navigation ||
+                                       frame.header.type == protocol::MessageType::set_route_eta;
     if (is_navigation_command) {
         acknowledgement.result = g_transfer.active ? protocol::ResultCode::busy
                                                     : g_instance->handle_navigation_command(frame.header.type, frame.payload);

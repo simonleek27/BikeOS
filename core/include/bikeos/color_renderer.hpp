@@ -21,6 +21,8 @@ enum class ThemeMode : std::uint8_t {
 
 struct ColorFrameInput {
     std::int64_t utc_epoch_ms{};  // 0 when the GPS has not reported a date and time yet
+    // Local minutes after midnight sent by the phone. -1 means unavailable.
+    std::int32_t eta_minutes_local{-1};
     ThemeMode theme{ThemeMode::automatic};
     // Monotonic frame time. When set, the rider glides between fixes; 0 draws
     // each snapshot exactly where it is (tests, previews, 1 Hz builds).

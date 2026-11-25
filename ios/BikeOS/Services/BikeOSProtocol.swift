@@ -7,6 +7,7 @@ enum BikeOSMessageType: UInt8 {
     case acknowledgement = 8, error = 9, status = 10, rerouteRequest = 11
     case pauseNavigation = 12, resumeNavigation = 13, restartNavigation = 14
     case stopNavigation = 15, triggerOffRoute = 16, restoreNavigation = 17
+    case setRouteETA = 18
 }
 
 enum BikeOSResultCode: UInt8 { case ok = 0, accepted = 1, invalidFrame = 2, unsupportedVersion = 3, busy = 4, invalidTransfer = 5, invalidOffset = 6, crcMismatch = 7, invalidBundle = 8, cancelled = 9, unauthorized = 10 }

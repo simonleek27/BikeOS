@@ -3,7 +3,64 @@ import MapKit
 import SwiftUI
 
 @main struct BikeOSApp: App {
-    var body: some Scene { WindowGroup { BikeOSHomeView() } }
+    var body: some Scene { WindowGroup { BikeOSRootView() } }
+}
+
+struct BikeOSRootView: View {
+    @StateObject private var bluetooth = BikeOSBluetooth()
+    @StateObject private var location = BikeOSLocationProvider()
+    @State private var enteredApp = false
+
+    var body: some View {
+        Group {
+            if enteredApp {
+                BikeOSHomeView(bluetooth: bluetooth, location: location)
+            } else {
+                BikeOSConnectView(bluetooth: bluetooth)
+            }
+        }
+        .onChange(of: bluetooth.connectionState) { _, state in
+            if state == .readyForTransfer || state == .connected { enteredApp = true }
+        }
+    }
+}
+
+struct BikeOSConnectView: View {
+    @ObservedObject var bluetooth: BikeOSBluetooth
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            Image(systemName: "bicycle.circle.fill")
+                .font(.system(size: 72))
+                .foregroundStyle(.blue)
+            Text("BikeOS").font(.largeTitle.bold())
+            Text("Connect your bike computer to start planning and navigating.")
+                .font(.body).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 300)
+            ConnectionStatusView(state: bluetooth.connectionState,
+                                 deviceName: bluetooth.deviceName,
+                                 firmwareInfo: bluetooth.firmwareInfo)
+                .frame(maxWidth: 340)
+            Button {
+                bluetooth.connect()
+            } label: {
+                Label(bluetooth.connectionState == .scanning || bluetooth.connectionState == .connecting
+                      ? "Connecting…" : "Connect", systemImage: "dot.radiowaves.left.and.right")
+                    .frame(maxWidth: .infinity, minHeight: 52)
+            }
+            .buttonStyle(.borderedProminent)
+            .contentShape(Rectangle())
+            .disabled(bluetooth.connectionState == .scanning || bluetooth.connectionState == .connecting)
+            Text("Keep the ESP32 powered on and nearby.")
+                .font(.footnote).foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
+    }
 }
 
 @MainActor final class BikeOSLocationProvider: NSObject, ObservableObject, CLLocationManagerDelegate {
@@ -41,8 +98,8 @@ import SwiftUI
 }
 
 struct BikeOSHomeView: View {
-    @StateObject private var bluetooth = BikeOSBluetooth()
-    @StateObject private var location = BikeOSLocationProvider()
+    @ObservedObject var bluetooth: BikeOSBluetooth
+    @ObservedObject var location: BikeOSLocationProvider
     @State private var route: BikeOSRoutePlan?
     @State private var routeError: String?
     @State private var showingNavigation = false

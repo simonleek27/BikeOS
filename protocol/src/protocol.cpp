@@ -36,7 +36,7 @@ bool read_le(std::span<const std::uint8_t> input, std::size_t& offset, T& value)
 bool valid_type(const std::uint8_t value)
 {
     return value >= static_cast<std::uint8_t>(MessageType::status_request) &&
-           value <= static_cast<std::uint8_t>(MessageType::restore_navigation);
+           value <= static_cast<std::uint8_t>(MessageType::set_route_eta);
 }
 
 }  // namespace
@@ -249,6 +249,24 @@ bool decode_navigation_restore(const std::span<const std::uint8_t> payload, Navi
     }
     output.run_state = static_cast<RunState>(run_state);
     return true;
+}
+
+std::vector<std::uint8_t> encode_route_eta(const RouteEta& eta)
+{
+    if (eta.route_id == 0 || eta.eta_minutes_local >= 1440) return {};
+    std::vector<std::uint8_t> output;
+    output.reserve(6);
+    append_le(output, eta.route_id);
+    append_le(output, eta.eta_minutes_local);
+    return output;
+}
+
+bool decode_route_eta(const std::span<const std::uint8_t> payload, RouteEta& output)
+{
+    if (payload.size() != 6) return false;
+    std::size_t offset = 0;
+    return read_le(payload, offset, output.route_id) && read_le(payload, offset, output.eta_minutes_local) &&
+           output.route_id != 0 && output.eta_minutes_local < 1440;
 }
 
 bool decode_acknowledgement(const std::span<const std::uint8_t> payload, Acknowledgement& output)

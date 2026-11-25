@@ -71,6 +71,7 @@ private struct BikeOSRideCheckpoint: Codable {
     var latitude: Double
     var longitude: Double
     var headingDeg: Double?
+    var etaMinutesLocal: UInt16?
     var runStateRaw: UInt8
     var updatedAt: Date
 
@@ -309,6 +310,8 @@ private struct BikeOSRideCheckpoint: Codable {
     private func sendRestoreNavigation(_ saved: BikeOSRideCheckpoint) {
         guard isReadyForTransfer, let activeRoutePlan,
               activeRoutePlan.routeID == saved.routeID else { return }
+        sendRouteETA(routeID: saved.routeID,
+                     etaMinutesLocal: etaMinutesLocal(for: activeRoutePlan, progressM: saved.progressM))
         let progressCm = UInt32(max(0, min(Double(UInt32.max) / 100.0, saved.progressM)) * 100.0)
         var payload = Data()
         payload.appendLE(saved.routeID)
@@ -348,10 +351,31 @@ private struct BikeOSRideCheckpoint: Codable {
                                          latitude: coordinate.latitude,
                                          longitude: coordinate.longitude,
                                          headingDeg: preserveProgress && checkpoint?.routeID == route.routeID ? checkpoint!.headingDeg : nil,
+                                         etaMinutesLocal: preserveProgress && checkpoint?.routeID == route.routeID
+                                             ? checkpoint!.etaMinutesLocal
+                                             : etaMinutesLocal(for: route),
                                          runStateRaw: BikeOSRunState.notStarted.rawValue,
                                          updatedAt: Date())
         checkpoint = saved
         persistCheckpoint(saved)
+    }
+
+    private func etaMinutesLocal(for route: BikeOSRoutePlan, progressM: Double = 0) -> UInt16 {
+        let completed = max(0, min(route.distanceM, progressM))
+        let remainingFraction = route.distanceM > 1 ? max(0, 1 - completed / route.distanceM) : 0
+        let remainingSeconds = Double(max(0, route.durationMin)) * 60.0 * remainingFraction
+        let arrival = Date().addingTimeInterval(remainingSeconds)
+        let components = Calendar.current.dateComponents([.hour, .minute], from: arrival)
+        let minutes = (components.hour ?? 0) * 60 + (components.minute ?? 0)
+        return UInt16(max(0, min(1439, minutes)))
+    }
+
+    private func sendRouteETA(routeID: UInt32, etaMinutesLocal: UInt16) {
+        guard isReadyForTransfer, etaMinutesLocal < 1440 else { return }
+        var payload = Data()
+        payload.appendLE(routeID)
+        payload.appendLE(etaMinutesLocal)
+        _ = sendControl(type: .setRouteETA, payload: payload, label: "Sending arrival time")
     }
 
     private func persistCheckpoint(_ saved: BikeOSRideCheckpoint) {
@@ -863,6 +887,8 @@ extension BikeOSBluetooth: CBPeripheralDelegate {
                     if let saved = pendingRestore {
                         pendingRestore = nil
                         sendRestoreNavigation(saved)
+                    } else if let activeRoutePlan {
+                        sendRouteETA(routeID: routeID, etaMinutesLocal: etaMinutesLocal(for: activeRoutePlan))
                     }
                 }
             }

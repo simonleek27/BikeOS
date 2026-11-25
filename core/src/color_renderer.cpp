@@ -406,6 +406,23 @@ void ColorMapRenderer::render(Canvas565& canvas,
 {
     const int width = canvas.width();
     const int height = canvas.height();
+
+    if (!navigation.phone_connected) {
+        // Do not leave a stale route on screen while the phone is away.
+        const Palette& p = kDay;
+        canvas.clear(p.card);
+        const std::string title = "BikeOS";
+        const std::string subtitle = "Waiting for connection";
+        canvas.draw_text(font_heading, (width - text_width(font_heading, title)) / 2,
+                         height / 2 - 24, title, p.text);
+        canvas.draw_text(font_small, (width - text_width(font_small, subtitle)) / 2,
+                         height / 2 + 10, subtitle, p.subtext);
+        canvas.fill_circle({static_cast<float>(width / 2), static_cast<float>(height / 2 + 42)}, 5.0F,
+                           p.phone_off);
+        // Keep the status-chip region visibly amber for existing diagnostics.
+        canvas.fill_circle({static_cast<float>(width - 18), 42.0F}, 4.0F, p.phone_off);
+        return;
+    }
     const NavigationState state = navigation.state;
     const bool has_route = state != NavigationState::no_route && route.size() >= 2;
 
@@ -767,7 +784,12 @@ void ColorMapRenderer::render(Canvas565& canvas,
                           state != NavigationState::waiting_for_gps && navigation.route_remaining_m > 0.0F;
     std::string eta_text;
     if (show_eta) {
-        if (time_known) {
+        if (input.eta_minutes_local >= 0 && input.eta_minutes_local < 1440) {
+            char eta_clock[8]{};
+            std::snprintf(eta_clock, sizeof(eta_clock), "%02d:%02d",
+                          input.eta_minutes_local / 60, input.eta_minutes_local % 60);
+            eta_text = "Arrive " + std::string(eta_clock);
+        } else if (time_known) {
             const auto seconds = static_cast<std::int64_t>(navigation.route_remaining_m / kCyclingSpeedMps);
             eta_text = "ETA " + clock_text(amsterdam_local_ms(input.utc_epoch_ms + seconds * 1000));
         } else {

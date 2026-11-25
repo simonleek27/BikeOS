@@ -47,6 +47,7 @@ enum class MessageType : std::uint8_t {
     stop_navigation = 15,
     trigger_off_route = 16,
     restore_navigation = 17,
+    set_route_eta = 18,
 };
 
 enum class ResultCode : std::uint8_t {
@@ -130,6 +131,14 @@ struct NavigationRestore {
     RunState run_state{RunState::paused};
 };
 
+// Phone-provided local arrival time for the active route. Minutes are in the
+// user's local day (0...1439), so the TFT can show an arrival clock without
+// interpreting simulator GPS timestamps as wall-clock time.
+struct RouteEta {
+    std::uint32_t route_id{};
+    std::uint16_t eta_minutes_local{};
+};
+
 struct BleFragmentHeader {
     std::uint16_t message_id{};
     std::uint16_t total_size{};
@@ -191,6 +200,8 @@ std::vector<std::uint8_t> encode_acknowledgement(const Acknowledgement& acknowle
 bool decode_acknowledgement(std::span<const std::uint8_t> payload, Acknowledgement& output);
 std::vector<std::uint8_t> encode_navigation_restore(const NavigationRestore& restore);
 bool decode_navigation_restore(std::span<const std::uint8_t> payload, NavigationRestore& output);
+std::vector<std::uint8_t> encode_route_eta(const RouteEta& eta);
+bool decode_route_eta(std::span<const std::uint8_t> payload, RouteEta& output);
 std::vector<std::uint8_t> encode_status(const Status& status);
 bool decode_status(std::span<const std::uint8_t> payload, Status& output);
 
