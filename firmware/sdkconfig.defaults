@@ -39,11 +39,14 @@ CONFIG_BIKEOS_ILI9341_CLOCK_HZ=26000000
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 
-# Indoor demo uses the deterministic simulator. Keep the UART settings below
-# commented so switching back to the NEO-6M is explicit and does not change the
-# verified TFT configuration.
-CONFIG_BIKEOS_GPS_SIM=y
-# CONFIG_BIKEOS_GPS_UART is not set
+# Real GPS uses the verified NEO-6M UART wiring: module TX -> ESP32 GPIO18
+# (UART1 RX), optional ESP32 GPIO17 (UART1 TX) -> module RX, 9600 baud.
+# The route is armed indoors and begins on the first valid fix.
+CONFIG_BIKEOS_GPS_UART=y
+CONFIG_BIKEOS_GPS_UART_NUMBER=1
+CONFIG_BIKEOS_GPS_RX_GPIO=18
+CONFIG_BIKEOS_GPS_TX_GPIO=17
+CONFIG_BIKEOS_GPS_BAUD=9600
 # CONFIG_BIKEOS_GPS_IPHONE is not set
 
 # Custom partition table: 4 MB app plus a 12 MB "map" data partition for the
